@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Proyecto Electiva I</string>
+
+    <!-- Textos del menú lateral -->
+    <string name="navigation_drawer_open">Abrir menú</string>
+    <string name="navigation_drawer_close">Cerrar menú</string>
+
+    <!-- Textos del buscador -->
+    <string name="search_hint">Buscar zonas, lugares, categorías...</string>
+</resources>
