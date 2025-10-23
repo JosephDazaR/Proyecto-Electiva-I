@@ -27,8 +27,8 @@
         </com.google.android.material.appbar.AppBarLayout>
 
         <!-- Contenedor del mapa -->
-        <FrameLayout
-            android:id="@+id/mapContainer"
+        <org.maplibre.android.maps.MapView
+            android:id="@+id/mapView"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:layout_marginTop="?attr/actionBarSize" />
