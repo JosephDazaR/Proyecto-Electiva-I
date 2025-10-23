@@ -8,4 +8,49 @@
 
     <!-- Textos del buscador -->
     <string name="search_hint">Buscar zonas, lugares, categorías...</string>
+    
+    <!-- MapLibre -->
+    <string name="mapbox_access_token">pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4NXVycTA2emYycXBndHRqcmZ3N3gifQ.rJcFIG214AriISLbB6B5aw</string>
+    
+    <!-- Mapa -->
+    <string name="map_title">Mapa de Lugares</string>
+    <string name="search_places_hint">Buscar lugares...</string>
+    <string name="filter_places">Filtrar lugares</string>
+    <string name="view_mode">Modo de visualización</string>
+    <string name="my_location">Mi ubicación</string>
+    
+    <!-- Tipos de lugares -->
+    <string name="type_tourist">Turístico</string>
+    <string name="type_air_quality">Calidad del Aire</string>
+    <string name="type_park">Parque</string>
+    <string name="type_restaurant">Restaurante</string>
+    <string name="type_cafe">Café</string>
+    
+    <!-- Modos de visualización -->
+    <string name="view_mode_points">Puntos</string>
+    <string name="view_mode_clusters">Clústeres</string>
+    <string name="view_mode_heatmap">Mapa de Calor</string>
+    
+    <!-- Calidad del aire -->
+    <string name="air_quality_good">Buena</string>
+    <string name="air_quality_moderate">Moderada</string>
+    <string name="air_quality_unhealthy_sensitive">Insalubre para grupos sensibles</string>
+    <string name="air_quality_unhealthy">Insalubre</string>
+    <string name="air_quality_very_unhealthy">Muy insalubre</string>
+    <string name="air_quality_hazardous">Peligrosa</string>
+    
+    <!-- Mensajes -->
+    <string name="error_loading_places">Error cargando lugares</string>
+    <string name="no_places_found">No se encontraron lugares</string>
+    <string name="location_permission_required">Se requiere permiso de ubicación</string>
+    <string name="network_error">Error de conexión</string>
+    <string name="offline_mode">Modo offline</string>
+    
+    <!-- Acciones -->
+    <string name="add_to_favorites">Agregar a favoritos</string>
+    <string name="remove_from_favorites">Quitar de favoritos</string>
+    <string name="close">Cerrar</string>
+    <string name="refresh">Actualizar</string>
+    <string name="share">Compartir</string>
+    <string name="directions">Direcciones</string>
 </resources>

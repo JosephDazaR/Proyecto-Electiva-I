@@ -2,4 +2,33 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    
+    <!-- Colores principales -->
+    <color name="primary">#FF2196F3</color>
+    <color name="primary_dark">#FF1976D2</color>
+    <color name="secondary">#FF03DAC6</color>
+    <color name="accent">#FFFF9800</color>
+    
+    <!-- Colores de fondo -->
+    <color name="background">#FFF5F5F5</color>
+    <color name="surface">#FFFFFFFF</color>
+    
+    <!-- Colores de texto -->
+    <color name="text_primary">#FF212121</color>
+    <color name="text_secondary">#FF757575</color>
+    <color name="gray">#FF9E9E9E</color>
+    
+    <!-- Colores para tipos de lugares -->
+    <color name="tourist">#FF4CAF50</color>
+    <color name="air_quality">#FFFF5722</color>
+    <color name="park">#FF8BC34A</color>
+    <color name="restaurant">#FFFF9800</color>
+    <color name="cafe">#FF795548</color>
+    
+    <!-- Colores para calidad del aire -->
+    <color name="air_good">#FF4CAF50</color>
+    <color name="air_moderate">#FFFFEB3B</color>
+    <color name="air_unhealthy">#FFFF9800</color>
+    <color name="air_very_unhealthy">#FFFF5722</color>
+    <color name="air_hazardous">#FFF44336</color>
 </resources>

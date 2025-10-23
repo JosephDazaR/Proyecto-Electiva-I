@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    id("kotlin-kapt")
 }
 
 android {
@@ -41,24 +42,43 @@ android {
 }
 
 dependencies {
+    // Android Core
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
 
-    // RecyclerView (sugerencias)
+    // RecyclerView y UI
     implementation("androidx.recyclerview:recyclerview:1.3.2")
-
-    // Drawer (lo podemos añadir aquí o en el paso siguiente)
     implementation("androidx.drawerlayout:drawerlayout:1.2.0")
 
-    // Google Maps
-    implementation("com.google.android.gms:play-services-maps:18.2.0")
+    // MapLibre (reemplaza Google Maps)
+    implementation(libs.maplibre.android)
+    implementation(libs.maplibre.plugin.offline)
 
+    // Room Database
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    kapt(libs.room.compiler)
+
+    // Retrofit y Networking
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.gson)
+    implementation(libs.gson)
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+
+    // WorkManager
+    implementation(libs.work.runtime.ktx)
+
+    // Lifecycle y Coroutines
+    implementation(libs.lifecycle.viewmodel.ktx)
+    implementation(libs.lifecycle.livedata.ktx)
+    implementation(libs.kotlinx.coroutines.android)
+
+    // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
-
-    implementation("org.maplibre.gl:android-sdk:11.5.1")
 }
