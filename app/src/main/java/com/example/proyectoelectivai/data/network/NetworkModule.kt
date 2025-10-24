@@ -23,16 +23,6 @@ object NetworkModule {
     private const val READ_TIMEOUT = 30L
     private const val WRITE_TIMEOUT = 30L
     
-    fun createApiService(context: Context): ApiService {
-        val retrofit = Retrofit.Builder()
-            .baseUrl("https://api.opentripmap.com/")
-            .client(createOkHttpClient(context))
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-        
-        return retrofit.create(ApiService::class.java)
-    }
-    
     fun createOpenAQService(context: Context): ApiService {
         val retrofit = Retrofit.Builder()
             .baseUrl("https://api.openaq.org/")
@@ -51,6 +41,16 @@ object NetworkModule {
             .build()
         
         return retrofit.create(ApiService::class.java)
+    }
+    
+    fun createGeocodingService(context: Context): GeocodingService {
+        val retrofit = Retrofit.Builder()
+            .baseUrl("https://nominatim.openstreetmap.org/")
+            .client(createOkHttpClient(context))
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+        
+        return retrofit.create(GeocodingService::class.java)
     }
     
     private fun createOkHttpClient(context: Context): OkHttpClient {

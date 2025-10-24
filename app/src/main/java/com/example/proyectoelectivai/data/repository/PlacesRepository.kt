@@ -21,9 +21,9 @@ class PlacesRepository(private val context: Context) {
     private val placeDao: PlaceDao = database.placeDao()
     
     // Servicios API
-    private val openTripMapService = NetworkModule.createApiService(context)
     private val openAQService = NetworkModule.createOpenAQService(context)
     private val overpassService = NetworkModule.createOverpassService(context)
+    private val geocodingService = NetworkModule.createGeocodingService(context)
     
     private val isNetworkAvailable: Boolean
         get() = NetworkModule.isNetworkAvailable(context)
@@ -59,6 +59,39 @@ class PlacesRepository(private val context: Context) {
      */
     suspend fun searchPlaces(query: String): Flow<List<Place>> {
         return placeDao.searchPlaces(query)
+    }
+    
+    /**
+     * Busca direcciones usando geocoding
+     */
+    suspend fun searchAddress(query: String): List<Place> {
+        return try {
+            if (isNetworkAvailable) {
+                val response = geocodingService.searchAddress(query)
+                if (response.isSuccessful) {
+                    response.body()?.mapNotNull { result ->
+                        Place(
+                            id = "geocoding_${result.place_id}",
+                            name = result.display_name,
+                            type = "address",
+                            lat = result.lat.toDouble(),
+                            lon = result.lon.toDouble(),
+                            description = "Dirección encontrada",
+                            address = result.display_name,
+                            source = "geocoding"
+                        )
+                    } ?: emptyList()
+                } else {
+                    emptyList()
+                }
+            } else {
+                // Si no hay red, buscar en lugares existentes
+                placeDao.searchPlaces(query).first()
+            }
+        } catch (e: Exception) {
+            println("Error searching address: ${e.message}")
+            emptyList()
+        }
     }
     
     /**
@@ -98,13 +131,10 @@ class PlacesRepository(private val context: Context) {
             val currentTime = System.currentTimeMillis()
             val places = mutableListOf<Place>()
             
-            // Obtener datos de OpenTripMap (lugares turísticos)
-            places.addAll(fetchTouristPlaces())
-            
             // Obtener datos de OpenAQ (calidad del aire)
             places.addAll(fetchAirQualityData())
             
-            // Obtener datos de OSM (parques, restaurantes, etc.)
+            // Obtener datos de OSM (lugares turísticos, parques, restaurantes, etc.)
             places.addAll(fetchOSMData())
             
             // Guardar en base de datos
@@ -124,9 +154,8 @@ class PlacesRepository(private val context: Context) {
     private suspend fun refreshDataByType(type: String) {
         try {
             val places = when (type) {
-                "tourist" -> fetchTouristPlaces()
                 "air_quality" -> fetchAirQualityData()
-                "park", "restaurant" -> fetchOSMData()
+                "tourist", "park", "restaurant", "cafe" -> fetchOSMData()
                 else -> emptyList()
             }
             
@@ -151,7 +180,6 @@ class PlacesRepository(private val context: Context) {
             val radius = calculateRadius(minLat, maxLat, minLon, maxLon)
             
             val places = mutableListOf<Place>()
-            places.addAll(fetchTouristPlaces(centerLat, centerLon, radius))
             places.addAll(fetchAirQualityData(centerLat, centerLon, radius))
             places.addAll(fetchOSMDataInBounds(minLat, maxLat, minLon, maxLon))
             
@@ -163,47 +191,6 @@ class PlacesRepository(private val context: Context) {
         }
     }
     
-    /**
-     * Obtiene lugares turísticos de OpenTripMap
-     */
-    private suspend fun fetchTouristPlaces(
-        lat: Double = 4.7110, 
-        lon: Double = -74.0721, 
-        radius: Int = 1000
-    ): List<Place> {
-        return try {
-            val response = openTripMapService.getTouristPlaces(
-                apikey = "TU_API_KEY_AQUI", // TODO: Configurar desde variables de entorno
-                lon = lon,
-                lat = lat,
-                radius = radius,
-                limit = 20
-            )
-            
-            if (response.isSuccessful) {
-                response.body()?.features?.mapNotNull { feature ->
-                    val coords = feature.geometry.coordinates
-                    if (coords.size >= 2) {
-                        Place(
-                            id = "tourist_${feature.properties.xid}",
-                            name = feature.properties.name,
-                            type = "tourist",
-                            lat = coords[1], // lat
-                            lon = coords[0], // lon
-                            description = feature.properties.kinds,
-                            rating = feature.properties.rate?.toDoubleOrNull(),
-                            source = "opentripmap"
-                        )
-                    } else null
-                } ?: emptyList()
-            } else {
-                emptyList()
-            }
-        } catch (e: Exception) {
-            println("Error fetching tourist places: ${e.message}")
-            emptyList()
-        }
-    }
     
     /**
      * Obtiene datos de calidad del aire de OpenAQ
@@ -251,7 +238,7 @@ class PlacesRepository(private val context: Context) {
     }
     
     /**
-     * Obtiene datos de OpenStreetMap
+     * Obtiene datos de OpenStreetMap (lugares turísticos, restaurantes, parques, etc.)
      */
     private suspend fun fetchOSMData(
         lat: Double = 4.7110, 
@@ -278,9 +265,12 @@ class PlacesRepository(private val context: Context) {
             val query = """
                 [out:json][timeout:25];
                 (
+                  node["tourism"~"^(museum|attraction|monument|gallery|zoo|theme_park)$"]($minLat,$minLon,$maxLat,$maxLon);
                   node["leisure"="park"]($minLat,$minLon,$maxLat,$maxLon);
                   node["amenity"="restaurant"]($minLat,$minLon,$maxLat,$maxLon);
                   node["amenity"="cafe"]($minLat,$minLon,$maxLat,$maxLon);
+                  node["amenity"="bar"]($minLat,$minLon,$maxLat,$maxLon);
+                  node["amenity"="fast_food"]($minLat,$minLon,$maxLat,$maxLon);
                 );
                 out geom;
             """.trimIndent()
@@ -291,9 +281,12 @@ class PlacesRepository(private val context: Context) {
                 response.body()?.elements?.mapNotNull { element ->
                     val tags = element.tags ?: return@mapNotNull null
                     val type = when {
+                        tags["tourism"] in listOf("museum", "attraction", "monument", "gallery", "zoo", "theme_park") -> "tourist"
                         tags["leisure"] == "park" -> "park"
                         tags["amenity"] == "restaurant" -> "restaurant"
                         tags["amenity"] == "cafe" -> "cafe"
+                        tags["amenity"] == "bar" -> "bar"
+                        tags["amenity"] == "fast_food" -> "fast_food"
                         else -> "other"
                     }
                     
@@ -303,7 +296,7 @@ class PlacesRepository(private val context: Context) {
                         type = type,
                         lat = element.lat,
                         lon = element.lon,
-                        description = tags["description"] ?: tags["cuisine"],
+                        description = tags["description"] ?: tags["cuisine"] ?: tags["tourism"],
                         address = tags["addr:street"],
                         phone = tags["phone"],
                         website = tags["website"],
@@ -362,6 +355,91 @@ class PlacesRepository(private val context: Context) {
             minLon = lon - lonOffset,
             maxLon = lon + lonOffset
         )
+    }
+    
+    /**
+     * Carga datos de ejemplo para Bogotá
+     */
+    suspend fun loadSampleData() {
+        try {
+            val samplePlaces = listOf(
+                Place(
+                    id = "sample_1",
+                    name = "Museo del Oro",
+                    type = "tourist",
+                    lat = 4.6019,
+                    lon = -74.0719,
+                    description = "Museo de arte precolombino con colección de oro",
+                    address = "Calle 16 #5-41, Bogotá",
+                    phone = "+57 1 343 2222",
+                    website = "https://www.banrepcultural.org/museo-del-oro",
+                    source = "sample"
+                ),
+                Place(
+                    id = "sample_2",
+                    name = "Parque Simón Bolívar",
+                    type = "park",
+                    lat = 4.6500,
+                    lon = -74.0833,
+                    description = "Parque urbano más grande de Bogotá",
+                    address = "Calle 63 #68-95, Bogotá",
+                    source = "sample"
+                ),
+                Place(
+                    id = "sample_3",
+                    name = "Andrés DC",
+                    type = "restaurant",
+                    lat = 4.6561,
+                    lon = -74.0597,
+                    description = "Restaurante tradicional colombiano",
+                    address = "Calle 82 #12-21, Bogotá",
+                    phone = "+57 1 616 8888",
+                    source = "sample"
+                ),
+                Place(
+                    id = "sample_4",
+                    name = "Café San Alberto",
+                    type = "cafe",
+                    lat = 4.6097,
+                    lon = -74.0817,
+                    description = "Café de especialidad colombiano",
+                    address = "Calle 93 #13-49, Bogotá",
+                    phone = "+57 1 616 1616",
+                    source = "sample"
+                ),
+                Place(
+                    id = "sample_5",
+                    name = "Catedral Primada",
+                    type = "tourist",
+                    lat = 4.5981,
+                    lon = -74.0758,
+                    description = "Catedral principal de Bogotá",
+                    address = "Carrera 7 #10-80, Bogotá",
+                    source = "sample"
+                ),
+                Place(
+                    id = "sample_6",
+                    name = "Estación de Monitoreo Aire Centro",
+                    type = "air_quality",
+                    lat = 4.6097,
+                    lon = -74.0817,
+                    description = "Estación de monitoreo de calidad del aire",
+                    address = "Centro de Bogotá",
+                    airQualityIndex = 45,
+                    airQualityLevel = "good",
+                    source = "sample"
+                )
+            )
+            
+            // Solo insertar si no hay datos
+            val count = placeDao.getPlacesCount()
+            if (count == 0) {
+                placeDao.insertPlaces(samplePlaces)
+                println("Datos de ejemplo cargados: ${samplePlaces.size} lugares")
+            }
+        } catch (e: Exception) {
+            println("Error cargando datos de ejemplo: ${e.message}")
+        }
     }
     
     private data class BoundingBox(

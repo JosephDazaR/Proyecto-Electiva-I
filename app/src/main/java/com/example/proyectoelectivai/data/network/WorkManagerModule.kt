@@ -66,11 +66,15 @@ object WorkManagerModule {
      * Obtiene el estado de la sincronización
      */
     fun getSyncStatus(context: Context, callback: (WorkInfo.State?) -> Unit) {
-        WorkManager.getInstance(context)
-            .getWorkInfosForUniqueWork(SYNC_WORK_NAME)
-            .observeForever { workInfos ->
-                val workInfo = workInfos.firstOrNull()
-                callback(workInfo?.state)
-            }
+        try {
+            val workInfos = WorkManager.getInstance(context)
+                .getWorkInfosForUniqueWork(SYNC_WORK_NAME)
+                .get()
+            
+            val workInfo = workInfos.firstOrNull()
+            callback(workInfo?.state)
+        } catch (e: Exception) {
+            callback(null)
+        }
     }
 }

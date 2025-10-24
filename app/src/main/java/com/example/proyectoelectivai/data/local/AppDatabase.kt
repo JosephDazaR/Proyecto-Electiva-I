@@ -16,7 +16,6 @@ import com.example.proyectoelectivai.data.model.Place
     version = 1,
     exportSchema = false
 )
-@TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     
     abstract fun placeDao(): PlaceDao
@@ -41,10 +40,3 @@ abstract class AppDatabase : RoomDatabase() {
     }
 }
 
-/**
- * Converters para tipos complejos en Room
- */
-class Converters {
-    // Aquí se pueden agregar convertidores si es necesario
-    // Por ejemplo, para listas, fechas personalizadas, etc.
-}

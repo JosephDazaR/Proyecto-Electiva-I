@@ -53,6 +53,8 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     
     init {
         loadAllPlaces()
+        // Cargar datos de ejemplo
+        loadSampleData()
     }
     
     /**
@@ -107,15 +109,36 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
                 if (query.isBlank()) {
                     loadAllPlaces()
                 } else {
+                    // Primero buscar en lugares existentes
                     repository.searchPlaces(query).collect { placesList ->
                         _places.value = placesList
                         applyFilters()
+                    }
+                    
+                    // También buscar direcciones si la búsqueda parece ser una dirección
+                    if (isAddressQuery(query)) {
+                        val addressResults = repository.searchAddress(query)
+                        if (addressResults.isNotEmpty()) {
+                            val currentPlaces = _places.value ?: emptyList()
+                            _places.value = currentPlaces + addressResults
+                            applyFilters()
+                        }
                     }
                 }
             } catch (e: Exception) {
                 _error.value = "Error buscando lugares: ${e.message}"
             }
         }
+    }
+    
+    /**
+     * Determina si la consulta parece ser una dirección
+     */
+    private fun isAddressQuery(query: String): Boolean {
+        val addressKeywords = listOf("calle", "carrera", "avenida", "avenue", "street", "road", "casa", "apartamento", "edificio", "centro", "norte", "sur", "este", "oeste")
+        return addressKeywords.any { keyword -> 
+            query.lowercase().contains(keyword.lowercase()) 
+        } || query.contains(Regex("\\d+")) // Contiene números
     }
     
     /**
@@ -244,6 +267,19 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun refresh() {
         loadAllPlaces()
+    }
+    
+    /**
+     * Carga datos de ejemplo
+     */
+    private fun loadSampleData() {
+        viewModelScope.launch {
+            try {
+                repository.loadSampleData()
+            } catch (e: Exception) {
+                _error.value = "Error cargando datos de ejemplo: ${e.message}"
+            }
+        }
     }
 }
 

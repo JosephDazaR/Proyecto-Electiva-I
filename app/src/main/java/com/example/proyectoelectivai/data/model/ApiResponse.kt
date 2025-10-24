@@ -4,31 +4,6 @@ package com.example.proyectoelectivai.data.model
  * Modelos de respuesta para las diferentes APIs
  */
 
-// OpenTripMap API Response
-data class OpenTripMapResponse(
-    val features: List<OpenTripMapFeature>
-)
-
-data class OpenTripMapFeature(
-    val type: String,
-    val properties: OpenTripMapProperties,
-    val geometry: OpenTripMapGeometry
-)
-
-data class OpenTripMapProperties(
-    val xid: String,
-    val name: String,
-    val rate: String?,
-    val osm: String?,
-    val wikidata: String?,
-    val kinds: String?
-)
-
-data class OpenTripMapGeometry(
-    val type: String,
-    val coordinates: List<Double> // [lon, lat]
-)
-
 // OpenAQ API Response
 data class OpenAQResponse(
     val results: List<OpenAQResult>

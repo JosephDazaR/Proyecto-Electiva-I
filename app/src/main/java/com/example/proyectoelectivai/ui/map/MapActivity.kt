@@ -3,8 +3,9 @@ package com.example.proyectoelectivai.ui.map
 import android.Manifest
 import android.content.pm.PackageManager
 import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.os.Bundle
-import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -12,27 +13,18 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import com.example.proyectoelectivai.R
 import com.example.proyectoelectivai.data.model.Place
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationServices
-import com.mapbox.geojson.Feature
-import com.mapbox.geojson.FeatureCollection
-import com.mapbox.geojson.Point
-import com.mapbox.mapboxsdk.Mapbox
-import com.mapbox.mapboxsdk.camera.CameraPosition
-import com.mapbox.mapboxsdk.geometry.LatLng
-import com.mapbox.mapboxsdk.maps.MapView
-import com.mapbox.mapboxsdk.maps.MapboxMap
-import com.mapbox.mapboxsdk.maps.Style
-import com.mapbox.mapboxsdk.style.layers.CircleLayer
-import com.mapbox.mapboxsdk.style.layers.SymbolLayer
-import com.mapbox.mapboxsdk.style.sources.GeoJsonSource
-import com.mapbox.mapboxsdk.style.sources.Source
+import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
-import org.maplibre.android.maps.MapView as MapLibreMapView
-import org.maplibre.android.maps.MapLibreMap
-import org.maplibre.android.maps.Style
-import org.maplibre.android.maps.MapView as MapLibreMapView
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.Point
 
 /**
  * Actividad principal del mapa
@@ -40,10 +32,10 @@ import org.maplibre.android.maps.MapView as MapLibreMapView
  */
 class MapActivity : AppCompatActivity() {
     
-    private lateinit var mapView: MapLibreMapView
+    private lateinit var mapView: MapView
     private lateinit var mapLibreMap: MapLibreMap
     private lateinit var viewModel: MapViewModel
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private lateinit var locationManager: LocationManager
     
     private var currentLocation: Location? = null
     
@@ -53,9 +45,13 @@ class MapActivity : AppCompatActivity() {
     ) { permissions ->
         when {
             permissions.getOrDefault(Manifest.permission.ACCESS_FINE_LOCATION, false) -> {
+                // Ubicación obtenida
+                Toast.makeText(this, "Permisos de ubicación concedidos", Toast.LENGTH_SHORT).show()
                 getCurrentLocation()
             }
             permissions.getOrDefault(Manifest.permission.ACCESS_COARSE_LOCATION, false) -> {
+                // Ubicación obtenida
+                Toast.makeText(this, "Permisos de ubicación concedidos", Toast.LENGTH_SHORT).show()
                 getCurrentLocation()
             }
             else -> {
@@ -69,7 +65,7 @@ class MapActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         
         // Inicializar MapLibre
-        Mapbox.getInstance(this, getString(R.string.mapbox_access_token))
+        MapLibre.getInstance(this)
         
         setContentView(R.layout.activity_map)
         
@@ -80,8 +76,8 @@ class MapActivity : AppCompatActivity() {
         // Inicializar ViewModel
         viewModel = ViewModelProvider(this)[MapViewModel::class.java]
         
-        // Inicializar cliente de ubicación
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        // Inicializar LocationManager
+        locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         
         // Configurar mapa
         setupMap()
@@ -89,18 +85,43 @@ class MapActivity : AppCompatActivity() {
         // Configurar observadores
         setupObservers()
         
-        // Solicitar permisos
-        requestLocationPermissions()
+        // NO solicitar permisos aquí, se hará cuando el mapa esté listo
     }
     
     private fun setupMap() {
         mapView.getMapAsync { map ->
             mapLibreMap = map
             
-            // Configurar estilo del mapa
-            map.setStyle(Style.MAPBOX_STREETS) { style ->
+            // Configurar estilo del mapa con OpenStreetMap
+            val styleBuilder = org.maplibre.android.maps.Style.Builder()
+                .fromJson(
+                    """
+                    {
+                      "version": 8,
+                      "sources": {
+                        "osm": {
+                          "type": "raster",
+                          "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+                          "tileSize": 256
+                        }
+                      },
+                      "layers": [
+                        {
+                          "id": "osm-layer",
+                          "type": "raster",
+                          "source": "osm"
+                        }
+                      ]
+                    }
+                    """.trimIndent()
+                )
+
+            map.setStyle(styleBuilder) { style ->
                 // El mapa está listo
                 setupMapLayers(style)
+                
+                // AHORA que el mapa está listo, solicitar permisos
+                requestLocationPermissions()
             }
             
             // Configurar listeners
@@ -116,10 +137,10 @@ class MapActivity : AppCompatActivity() {
         // Crear capa de puntos
         val placesLayer = CircleLayer("places-layer", "places-source")
             .withProperties(
-                com.mapbox.mapboxsdk.style.expressions.Expression.get("circle-color"),
-                com.mapbox.mapboxsdk.style.expressions.Expression.get("circle-radius"),
-                com.mapbox.mapboxsdk.style.expressions.Expression.get("circle-stroke-width"),
-                com.mapbox.mapboxsdk.style.expressions.Expression.get("circle-stroke-color")
+                org.maplibre.android.style.layers.PropertyFactory.circleColor("#FF0000"),
+                org.maplibre.android.style.layers.PropertyFactory.circleRadius(12f),
+                org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth(3f),
+                org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor("#FFFFFF")
             )
         
         style.addLayer(placesLayer)
@@ -127,9 +148,12 @@ class MapActivity : AppCompatActivity() {
         // Crear capa de símbolos para etiquetas
         val labelsLayer = SymbolLayer("places-labels", "places-source")
             .withProperties(
-                com.mapbox.mapboxsdk.style.expressions.Expression.get("text-field"),
-                com.mapbox.mapboxsdk.style.expressions.Expression.get("text-size"),
-                com.mapbox.mapboxsdk.style.expressions.Expression.get("text-color")
+                org.maplibre.android.style.layers.PropertyFactory.textField(org.maplibre.android.style.expressions.Expression.get("name")),
+                org.maplibre.android.style.layers.PropertyFactory.textSize(14f),
+                org.maplibre.android.style.layers.PropertyFactory.textColor("#000000"),
+                org.maplibre.android.style.layers.PropertyFactory.textHaloColor("#FFFFFF"),
+                org.maplibre.android.style.layers.PropertyFactory.textHaloWidth(2f),
+                org.maplibre.android.style.layers.PropertyFactory.textOffset(arrayOf(0f, -2f))
             )
         
         style.addLayer(labelsLayer)
@@ -146,6 +170,10 @@ class MapActivity : AppCompatActivity() {
     private fun setupObservers() {
         // Observar lugares filtrados
         viewModel.filteredPlaces.observe(this) { places ->
+            println("DEBUG: Lugares filtrados recibidos: ${places.size}")
+            places.forEach { place ->
+                println("DEBUG: Lugar: ${place.name} - ${place.type} - Lat: ${place.lat}, Lon: ${place.lon}")
+            }
             updateMapWithPlaces(places)
         }
         
@@ -162,11 +190,81 @@ class MapActivity : AppCompatActivity() {
                 Toast.makeText(this, it, Toast.LENGTH_LONG).show()
             }
         }
+        
+        // Configurar botones
+        setupButtons()
+    }
+    
+    private fun setupButtons() {
+        // Botón de búsqueda con texto en tiempo real
+        val searchEditText = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.searchEditText)
+        searchEditText.setOnEditorActionListener { _, _, _ ->
+            val query = searchEditText.text.toString()
+            if (query.isNotEmpty()) {
+                println("DEBUG: Búsqueda manual: '$query'")
+                Toast.makeText(this, "Buscando: $query", Toast.LENGTH_SHORT).show()
+                viewModel.searchPlaces(query)
+            }
+            true
+        }
+        
+        // Agregar placeholder más claro
+        searchEditText.hint = "Buscar lugares, direcciones... (ej: Museo, Calle 82)"
+        
+        // Búsqueda mientras escribes con debounce
+        val searchHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        var searchRunnable: Runnable? = null
+        
+        searchEditText.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val query = s.toString()
+                
+                // Cancelar búsqueda anterior
+                searchRunnable?.let { searchHandler.removeCallbacks(it) }
+                
+                if (query.length > 2) { // Buscar después de 3 caracteres
+                    searchRunnable = Runnable {
+                        println("DEBUG: Buscando: '$query'")
+                        Toast.makeText(this@MapActivity, "Buscando: $query", Toast.LENGTH_SHORT).show()
+                        viewModel.searchPlaces(query)
+                    }
+                    searchHandler.postDelayed(searchRunnable!!, 500) // Debounce de 500ms
+                } else if (query.isEmpty()) {
+                    println("DEBUG: Cargando todos los lugares")
+                    viewModel.loadAllPlaces() // Cargar todos si está vacío
+                }
+            }
+        })
+        
+        // FAB de filtros
+        findViewById<com.google.android.material.floatingactionbutton.FloatingActionButton>(R.id.fabFilters)
+            .setOnClickListener {
+                // TODO: Abrir filtros
+                Toast.makeText(this, "Filtros", Toast.LENGTH_SHORT).show()
+            }
+        
+        // FAB de modo de vista
+        findViewById<com.google.android.material.floatingactionbutton.FloatingActionButton>(R.id.fabViewMode)
+            .setOnClickListener {
+                // TODO: Cambiar modo de vista
+                Toast.makeText(this, "Modo de vista", Toast.LENGTH_SHORT).show()
+            }
+        
+        // FAB de ubicación
+        findViewById<com.google.android.material.floatingactionbutton.FloatingActionButton>(R.id.fabLocation)
+            .setOnClickListener {
+                moveToDefaultLocation()
+            }
     }
     
     private fun updateMapWithPlaces(places: List<Place>) {
+        println("DEBUG: Actualizando mapa con ${places.size} lugares")
+        
         mapLibreMap.getStyle { style ->
             val features = places.map { place ->
+                println("DEBUG: Creando feature para: ${place.name}")
                 Feature.fromGeometry(
                     Point.fromLngLat(place.lon, place.lat)
                 ).apply {
@@ -178,7 +276,19 @@ class MapActivity : AppCompatActivity() {
             }
             
             val source = style.getSourceAs<GeoJsonSource>("places-source")
-            source?.setGeoJson(FeatureCollection.fromFeatures(features))
+            if (source != null) {
+                source.setGeoJson(FeatureCollection.fromFeatures(features))
+                println("DEBUG: GeoJSON actualizado con ${features.size} features")
+                
+                // Si hay lugares, mover la cámara al primer lugar
+                if (places.isNotEmpty()) {
+                    val firstPlace = places.first()
+                    moveToLocation(firstPlace.lat, firstPlace.lon)
+                    Toast.makeText(this, "Encontrados ${places.size} lugares", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                println("DEBUG: Error: No se encontró la fuente 'places-source'")
+            }
         }
     }
     
@@ -226,6 +336,7 @@ class MapActivity : AppCompatActivity() {
                 this,
                 Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED -> {
+                // Ya tiene permisos, obtener ubicación real
                 getCurrentLocation()
             }
             else -> {
@@ -240,33 +351,34 @@ class MapActivity : AppCompatActivity() {
     }
     
     private fun getCurrentLocation() {
-        if (ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            fusedLocationClient.lastLocation
-                .addOnSuccessListener { location ->
-                    if (location != null) {
-                        currentLocation = location
-                        moveToLocation(location.latitude, location.longitude)
-                    } else {
-                        moveToDefaultLocation()
-                    }
-                }
-                .addOnFailureListener {
+        try {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                val location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                if (location != null) {
+                    currentLocation = location
+                    moveToLocation(location.latitude, location.longitude)
+                    Toast.makeText(this, "Ubicación actual encontrada", Toast.LENGTH_SHORT).show()
+                } else {
+                    // Si no hay ubicación reciente, usar ubicación por defecto
+                    Toast.makeText(this, "No se encontró ubicación reciente, usando Bogotá", Toast.LENGTH_SHORT).show()
                     moveToDefaultLocation()
                 }
+            } else {
+                moveToDefaultLocation()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+            moveToDefaultLocation()
         }
     }
     
     private fun moveToLocation(lat: Double, lon: Double) {
-        mapLibreMap.animateCamera(
-            CameraPosition.Builder()
-                .target(LatLng(lat, lon))
-                .zoom(15.0)
-                .build()
-        )
+        val cameraPosition = CameraPosition.Builder()
+            .target(LatLng(lat, lon))
+            .zoom(15.0)
+            .build()
+        
+        mapLibreMap.cameraPosition = cameraPosition
     }
     
     private fun moveToDefaultLocation() {

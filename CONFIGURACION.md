@@ -13,29 +13,20 @@ Esta aplicación Android integra MapLibre, Retrofit, Room y WorkManager para mos
 - ✅ **Búsqueda**: Texto libre en nombres y descripciones
 
 ## APIs Integradas
-1. **OpenTripMap**: Lugares turísticos
-2. **OpenAQ**: Calidad del aire
-3. **Overpass API**: Datos de OpenStreetMap (parques, restaurantes)
+1. **OpenStreetMap (Overpass API)**: Lugares turísticos, parques, restaurantes, cafés (GRATUITO)
+2. **OpenAQ**: Calidad del aire (GRATUITO)
 
 ## Configuración Requerida
 
 ### 1. API Keys
-Edita el archivo `ApiConfig.kt` y reemplaza las siguientes claves:
+Edita el archivo `ApiConfig.kt` y reemplaza la siguiente clave:
 
 ```kotlin
-// OpenTripMap API Key (gratuita)
-const val OPEN_TRIP_MAP_API_KEY = "TU_API_KEY_REAL_AQUI"
-
 // MapLibre/Mapbox Token (gratuito)
 const val MAPLIBRE_ACCESS_TOKEN = "TU_TOKEN_REAL_AQUI"
 ```
 
 ### 2. Obtener API Keys
-
-#### OpenTripMap API Key:
-1. Ve a https://opentripmap.io/
-2. Regístrate gratuitamente
-3. Obtén tu API key del dashboard
 
 #### MapLibre Token:
 1. Ve a https://account.mapbox.com/
@@ -50,6 +41,8 @@ En `ApiConfig.kt`, ajusta las coordenadas por defecto:
 const val DEFAULT_LAT = 4.7110  // Tu latitud
 const val DEFAULT_LON = -74.0721  // Tu longitud
 ```
+
+**¡IMPORTANTE!** OpenStreetMap y OpenAQ son completamente gratuitos, no requieren API keys.
 
 ## Estructura del Proyecto
 

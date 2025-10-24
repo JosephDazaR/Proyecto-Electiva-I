@@ -17,7 +17,7 @@ interface PlaceDao {
     @Query("SELECT * FROM places WHERE type = :type ORDER BY lastUpdated DESC")
     fun getPlacesByType(type: String): Flow<List<Place>>
     
-    @Query("SELECT * FROM places WHERE name LIKE '%' || :query || '%' OR description LIKE '%' || :query || '%'")
+    @Query("SELECT * FROM places WHERE name LIKE '%' || :query || '%' OR description LIKE '%' || :query || '%' OR address LIKE '%' || :query || '%' OR type LIKE '%' || :query || '%'")
     fun searchPlaces(query: String): Flow<List<Place>>
     
     @Query("SELECT * FROM places WHERE isFavorite = 1 ORDER BY name ASC")

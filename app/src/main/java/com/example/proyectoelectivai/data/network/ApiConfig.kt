@@ -6,18 +6,14 @@ package com.example.proyectoelectivai.data.network
  */
 object ApiConfig {
     
-    // OpenTripMap API
-    const val OPEN_TRIP_MAP_BASE_URL = "https://api.opentripmap.com/"
-    const val OPEN_TRIP_MAP_API_KEY = "TU_API_KEY_AQUI" // TODO: Reemplazar con tu API key real
-    
-    // OpenAQ API
+    // OpenAQ API (Calidad del aire)
     const val OPEN_AQ_BASE_URL = "https://api.openaq.org/"
     
-    // Overpass API (OpenStreetMap)
+    // Overpass API (OpenStreetMap) - Gratuito, sin API key
     const val OVERPASS_BASE_URL = "https://overpass-api.de/"
     
-    // MapLibre/Mapbox
-    const val MAPLIBRE_ACCESS_TOKEN = "pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4NXVycTA2emYycXBndHRqcmZ3N3gifQ.rJcFIG214AriISLbB6B5aw"
+    // MapLibre/Mapbox - Token gratuito
+    const val MAPLIBRE_ACCESS_TOKEN = "pk.eyJ1Ijoiam9zZXBoeWxuIiwiYSI6ImNtaDQxMWtnbDFncGZhbXB1YnlkZ2Zud3cifQ.wIZPfb_V3yIe8gu1ELVvDw"
     
     // Configuración por defecto
     const val DEFAULT_LAT = 4.7110

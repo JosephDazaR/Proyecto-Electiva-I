@@ -31,7 +31,6 @@ androidx-constraintlayout = { group = "androidx.constraintlayout", name = "const
 
 # MapLibre y dependencias de datos
 maplibre-android = { group = "org.maplibre.gl", name = "android-sdk", version.ref = "maplibre" }
-maplibre-plugin-offline = { group = "org.maplibre.gl", name = "android-plugin-offline", version.ref = "maplibre" }
 
 # Room
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
@@ -56,4 +55,5 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version = "2.0.21-1.0.25" }
 
