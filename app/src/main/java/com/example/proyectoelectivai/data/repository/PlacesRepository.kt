@@ -5,6 +5,8 @@ import com.example.proyectoelectivai.data.local.AppDatabase
 import com.example.proyectoelectivai.data.local.PlaceDao
 import com.example.proyectoelectivai.data.model.*
 import com.example.proyectoelectivai.data.network.ApiService
+import com.example.proyectoelectivai.data.network.GeocodingService
+import com.example.proyectoelectivai.data.network.GeocodingResult
 import com.example.proyectoelectivai.data.network.NetworkModule
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -66,31 +68,70 @@ class PlacesRepository(private val context: Context) {
      */
     suspend fun searchAddress(query: String): List<Place> {
         return try {
+            val enhancedQuery = query.trim().replace("  ", " ")
+            println("DEBUG: ===== INICIANDO BÚSQUEDA DE DIRECCIÓN =====")
+            println("DEBUG: Query original: '$query'")
+            println("DEBUG: Query mejorada: '$enhancedQuery'")
+            println("DEBUG: Red disponible: $isNetworkAvailable")
+            
             if (isNetworkAvailable) {
-                val response = geocodingService.searchAddress(query)
+                println("DEBUG: Llamando a Nominatim API...")
+                val response = geocodingService.searchAddress(enhancedQuery)
+                println("DEBUG: Respuesta HTTP: ${response.code()}")
+                println("DEBUG: Mensaje: ${response.message()}")
+                
                 if (response.isSuccessful) {
-                    response.body()?.mapNotNull { result ->
-                        Place(
-                            id = "geocoding_${result.place_id}",
-                            name = result.display_name,
-                            type = "address",
-                            lat = result.lat.toDouble(),
-                            lon = result.lon.toDouble(),
-                            description = "Dirección encontrada",
-                            address = result.display_name,
-                            source = "geocoding"
-                        )
-                    } ?: emptyList()
+                    val results = response.body() ?: emptyList()
+                    println("DEBUG: ✅ Nominatim devolvió ${results.size} resultados")
+                    
+                    if (results.isNotEmpty()) {
+                        results.forEachIndexed { index, result ->
+                            println("DEBUG: Resultado $index: ${result.display_name}")
+                            println("DEBUG: Coordenadas: ${result.lat}, ${result.lon}")
+                        }
+                    }
+                    
+                    val places = results.mapNotNull { result ->
+                        try {
+                            // Determinar el tipo de lugar basado en los tags
+                            val placeType = determinePlaceType(result)
+                            val placeName = result.namedetails?.name ?: result.display_name
+                            val description = buildDescription(result)
+                            
+                            Place(
+                                id = "geocoding_${result.place_id}",
+                                name = placeName,
+                                type = placeType,
+                                lat = result.lat.toDoubleOrNull() ?: 0.0,
+                                lon = result.lon.toDoubleOrNull() ?: 0.0,
+                                description = description,
+                                address = result.display_name,
+                                source = "geocoding"
+                            )
+                        } catch (e: Exception) {
+                            println("DEBUG: Error procesando resultado: ${e.message}")
+                            null
+                        }
+                    }
+                    
+                    println("DEBUG: ✅ Lugares creados: ${places.size}")
+                    places
                 } else {
+                    val errorBody = response.errorBody()?.string() ?: "Sin detalles"
+                    println("DEBUG: ❌ Nominatim falló con código ${response.code()}")
+                    println("DEBUG: Error body: $errorBody")
                     emptyList()
                 }
             } else {
-                // Si no hay red, buscar en lugares existentes
+                println("DEBUG: Sin conexión, usando búsqueda local")
                 placeDao.searchPlaces(query).first()
             }
         } catch (e: Exception) {
-            println("Error searching address: ${e.message}")
+            println("DEBUG: ❌ EXCEPCIÓN en searchAddress: ${e.message}")
+            e.printStackTrace()
             emptyList()
+        } finally {
+            println("DEBUG: ===== FIN BÚSQUEDA DE DIRECCIÓN =====")
         }
     }
     
@@ -428,6 +469,47 @@ class PlacesRepository(private val context: Context) {
                     airQualityIndex = 45,
                     airQualityLevel = "good",
                     source = "sample"
+                ),
+                Place(
+                    id = "sample_7",
+                    name = "Centro Comercial Santafé",
+                    type = "shopping",
+                    lat = 4.6800,
+                    lon = -74.0500,
+                    description = "Centro comercial más grande de Bogotá",
+                    address = "Calle 183 #45-03, Bogotá",
+                    phone = "+57 1 644 0000",
+                    source = "sample"
+                ),
+                Place(
+                    id = "sample_8",
+                    name = "Zona Rosa",
+                    type = "entertainment",
+                    lat = 4.6561,
+                    lon = -74.0597,
+                    description = "Zona de entretenimiento y vida nocturna",
+                    address = "Calle 82 con Carrera 12, Bogotá",
+                    source = "sample"
+                ),
+                Place(
+                    id = "sample_9",
+                    name = "Chapinero",
+                    type = "neighborhood",
+                    lat = 4.6500,
+                    lon = -74.0600,
+                    description = "Barrio comercial y residencial",
+                    address = "Chapinero, Bogotá",
+                    source = "sample"
+                ),
+                Place(
+                    id = "sample_10",
+                    name = "Usaquén",
+                    type = "neighborhood",
+                    lat = 4.7000,
+                    lon = -74.0300,
+                    description = "Barrio histórico con plaza de mercado",
+                    address = "Usaquén, Bogotá",
+                    source = "sample"
                 )
             )
             
@@ -439,6 +521,82 @@ class PlacesRepository(private val context: Context) {
             }
         } catch (e: Exception) {
             println("Error cargando datos de ejemplo: ${e.message}")
+        }
+    }
+    
+    /**
+     * Determina el tipo de lugar basado en los tags de Nominatim
+     */
+    private fun determinePlaceType(result: GeocodingResult): String {
+        val tags = result.extratags
+        return when {
+            tags?.amenity != null -> when (tags.amenity) {
+                "restaurant", "cafe", "fast_food" -> "restaurant"
+                "hospital", "clinic" -> "health"
+                "school", "university" -> "education"
+                "bank", "atm" -> "finance"
+                "fuel" -> "gas_station"
+                else -> "amenity"
+            }
+            tags?.shop != null -> "shop"
+            tags?.tourism != null -> when (tags.tourism) {
+                "hotel", "hostel" -> "accommodation"
+                "museum", "gallery" -> "culture"
+                "attraction" -> "attraction"
+                else -> "tourism"
+            }
+            tags?.leisure != null -> when (tags.leisure) {
+                "park", "garden" -> "park"
+                "sports_centre", "stadium" -> "sports"
+                else -> "leisure"
+            }
+            tags?.historic != null -> "historic"
+            result.type == "house" -> "address"
+            result.type == "building" -> "building"
+            else -> "place"
+        }
+    }
+    
+    /**
+     * Construye una descripción detallada del lugar
+     */
+    private fun buildDescription(result: GeocodingResult): String {
+        val tags = result.extratags
+        val address = result.address
+        
+        val parts = mutableListOf<String>()
+        
+        // Agregar información del tipo de lugar
+        when {
+            tags?.amenity != null -> parts.add("📍 ${tags.amenity.replace("_", " ").uppercase()}")
+            tags?.shop != null -> parts.add("🛍️ ${tags.shop.replace("_", " ").uppercase()}")
+            tags?.tourism != null -> parts.add("🏛️ ${tags.tourism.replace("_", " ").uppercase()}")
+            tags?.leisure != null -> parts.add("🌳 ${tags.leisure.replace("_", " ").uppercase()}")
+            tags?.historic != null -> parts.add("🏛️ ${tags.historic.replace("_", " ").uppercase()}")
+        }
+        
+        // Agregar información de contacto si está disponible
+        tags?.phone?.let { parts.add("📞 $it") }
+        tags?.website?.let { parts.add("🌐 Sitio web disponible") }
+        tags?.opening_hours?.let { parts.add("🕒 $it") }
+        
+        // Agregar información de dirección
+        address?.let { addr ->
+            val addressParts = mutableListOf<String>()
+            addr.road?.let { addressParts.add(it) }
+            addr.neighbourhood?.let { addressParts.add(it) }
+            addr.suburb?.let { addressParts.add(it) }
+            addr.city?.let { addressParts.add(it) }
+            
+            if (addressParts.isNotEmpty()) {
+                parts.add("📍 ${addressParts.joinToString(", ")}")
+            }
+        }
+        
+        return if (parts.isNotEmpty()) {
+            parts.joinToString(" • ")
+        } else {
+            "Lugar encontrado en ${result.display_name}"
         }
     }
     

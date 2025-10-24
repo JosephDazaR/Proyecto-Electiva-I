@@ -14,9 +14,11 @@ interface GeocodingService {
     suspend fun searchAddress(
         @Query("q") query: String,
         @Query("format") format: String = "json",
-        @Query("limit") limit: Int = 5,
+        @Query("limit") limit: Int = 10,
         @Query("countrycodes") countryCodes: String = "co",
-        @Query("addressdetails") addressDetails: Int = 1
+        @Query("addressdetails") addressDetails: Int = 1,
+        @Query("extratags") extraTags: Int = 1,
+        @Query("namedetails") nameDetails: Int = 1
     ): Response<List<GeocodingResult>>
     
     @GET("reverse")
@@ -38,7 +40,9 @@ data class GeocodingResult(
     val lon: String,
     val type: String?,
     val importance: Double?,
-    val address: AddressDetails?
+    val address: AddressDetails?,
+    val extratags: ExtraTags?,
+    val namedetails: NameDetails?
 )
 
 /**
@@ -53,4 +57,29 @@ data class AddressDetails(
     val state: String?,
     val country: String?,
     val postcode: String?
+)
+
+/**
+ * Tags adicionales del lugar
+ */
+data class ExtraTags(
+    val amenity: String?,
+    val shop: String?,
+    val tourism: String?,
+    val leisure: String?,
+    val historic: String?,
+    val cuisine: String?,
+    val opening_hours: String?,
+    val phone: String?,
+    val website: String?
+)
+
+/**
+ * Detalles de nombres
+ */
+data class NameDetails(
+    val name: String?,
+    val name_en: String?,
+    val name_es: String?,
+    val alt_name: String?
 )

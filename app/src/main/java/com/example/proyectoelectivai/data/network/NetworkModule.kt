@@ -63,6 +63,14 @@ object NetworkModule {
             level = HttpLoggingInterceptor.Level.BODY
         }
         
+        // Interceptor para User-Agent (OBLIGATORIO para Nominatim)
+        val userAgentInterceptor = Interceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("User-Agent", "ProyectoElectivaI/1.0 (Android App)")
+                .build()
+            chain.proceed(request)
+        }
+        
         val offlineInterceptor = Interceptor { chain ->
             var request = chain.request()
             
@@ -83,6 +91,7 @@ object NetworkModule {
         
         return OkHttpClient.Builder()
             .cache(cache)
+            .addInterceptor(userAgentInterceptor) // CRÍTICO: User-Agent para Nominatim
             .addInterceptor(loggingInterceptor)
             .addInterceptor(offlineInterceptor)
             .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)

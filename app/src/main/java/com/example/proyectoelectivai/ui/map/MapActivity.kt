@@ -209,7 +209,7 @@ class MapActivity : AppCompatActivity() {
         }
         
         // Agregar placeholder más claro
-        searchEditText.hint = "Buscar lugares, direcciones... (ej: Museo, Calle 82)"
+        searchEditText.hint = "Buscar: Museo, Parque, Calle 82, Carrera 7, Chapinero..."
         
         // Búsqueda mientras escribes con debounce
         val searchHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -255,7 +255,23 @@ class MapActivity : AppCompatActivity() {
         // FAB de ubicación
         findViewById<com.google.android.material.floatingactionbutton.FloatingActionButton>(R.id.fabLocation)
             .setOnClickListener {
-                moveToDefaultLocation()
+                // Verificar permisos antes de obtener ubicación
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                    // Verificar si el GPS está habilitado
+                    if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) && 
+                        !locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                        Toast.makeText(this, "GPS y ubicación de red deshabilitados. Por favor, habilítalos en configuración.", Toast.LENGTH_LONG).show()
+                    }
+                    getCurrentLocation()
+                } else {
+                    // Solicitar permisos si no los tiene
+                    locationPermissionRequest.launch(
+                        arrayOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        )
+                    )
+                }
             }
     }
     
@@ -353,23 +369,124 @@ class MapActivity : AppCompatActivity() {
     private fun getCurrentLocation() {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                val location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                if (location != null) {
-                    currentLocation = location
-                    moveToLocation(location.latitude, location.longitude)
-                    Toast.makeText(this, "Ubicación actual encontrada", Toast.LENGTH_SHORT).show()
-                } else {
-                    // Si no hay ubicación reciente, usar ubicación por defecto
-                    Toast.makeText(this, "No se encontró ubicación reciente, usando Bogotá", Toast.LENGTH_SHORT).show()
-                    moveToDefaultLocation()
+                println("DEBUG: Iniciando obtención de ubicación...")
+                
+                // Verificar qué proveedores están disponibles
+                val gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                val networkEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+                val passiveEnabled = locationManager.isProviderEnabled(LocationManager.PASSIVE_PROVIDER)
+                
+                println("DEBUG: GPS habilitado: $gpsEnabled")
+                println("DEBUG: Network habilitado: $networkEnabled")
+                println("DEBUG: Passive habilitado: $passiveEnabled")
+                
+                // Intentar con la última ubicación conocida de diferentes proveedores
+                var bestLocation: Location? = null
+                
+                // Probar GPS primero
+                val gpsLocation = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                if (gpsLocation != null && isLocationRecent(gpsLocation)) {
+                    bestLocation = gpsLocation
+                    println("DEBUG: Ubicación GPS encontrada: ${gpsLocation.latitude}, ${gpsLocation.longitude}")
                 }
+                
+                // Si no hay GPS, probar Network
+                if (bestLocation == null) {
+                    val networkLocation = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                    if (networkLocation != null && isLocationRecent(networkLocation)) {
+                        bestLocation = networkLocation
+                        println("DEBUG: Ubicación Network encontrada: ${networkLocation.latitude}, ${networkLocation.longitude}")
+                    }
+                }
+                
+                // Si no hay Network, probar Passive
+                if (bestLocation == null) {
+                    val passiveLocation = locationManager.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
+                    if (passiveLocation != null && isLocationRecent(passiveLocation)) {
+                        bestLocation = passiveLocation
+                        println("DEBUG: Ubicación Passive encontrada: ${passiveLocation.latitude}, ${passiveLocation.longitude}")
+                    }
+                }
+                
+                // Si encontramos una ubicación reciente, usarla
+                if (bestLocation != null) {
+                    currentLocation = bestLocation
+                    moveToLocation(bestLocation.latitude, bestLocation.longitude)
+                    Toast.makeText(this, "Ubicación actual encontrada", Toast.LENGTH_SHORT).show()
+                    return
+                }
+                
+                // Si no hay ubicación reciente, solicitar nueva ubicación
+                Toast.makeText(this, "Obteniendo ubicación actual...", Toast.LENGTH_SHORT).show()
+                println("DEBUG: No hay ubicación reciente, solicitando nueva ubicación...")
+                
+                val locationListener = object : LocationListener {
+                    override fun onLocationChanged(location: Location) {
+                        println("DEBUG: Nueva ubicación recibida: ${location.latitude}, ${location.longitude}")
+                        currentLocation = location
+                        moveToLocation(location.latitude, location.longitude)
+                        Toast.makeText(this@MapActivity, "Ubicación actualizada", Toast.LENGTH_SHORT).show()
+                        locationManager.removeUpdates(this)
+                    }
+                    
+                    override fun onProviderEnabled(provider: String) {
+                        println("DEBUG: Proveedor habilitado: $provider")
+                    }
+                    
+                    override fun onProviderDisabled(provider: String) {
+                        println("DEBUG: Proveedor deshabilitado: $provider")
+                    }
+                }
+                
+                // Solicitar actualización de ubicación de múltiples proveedores
+                if (gpsEnabled) {
+                    locationManager.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        1000L, // 1 segundo
+                        1f, // 1 metro
+                        locationListener
+                    )
+                }
+                
+                if (networkEnabled) {
+                    locationManager.requestLocationUpdates(
+                        LocationManager.NETWORK_PROVIDER,
+                        1000L,
+                        10f, // 10 metros
+                        locationListener
+                    )
+                }
+                
+                // Timeout después de 15 segundos
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    locationManager.removeUpdates(locationListener)
+                    if (currentLocation == null) {
+                        println("DEBUG: Timeout alcanzado, no se pudo obtener ubicación")
+                        Toast.makeText(this, "No se pudo obtener ubicación, usando Bogotá", Toast.LENGTH_SHORT).show()
+                        moveToDefaultLocation()
+                    }
+                }, 15000)
+                
             } else {
+                println("DEBUG: Permisos de ubicación no concedidos")
+                Toast.makeText(this, "Permisos de ubicación no concedidos, usando Bogotá", Toast.LENGTH_SHORT).show()
                 moveToDefaultLocation()
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+            println("DEBUG: Error obteniendo ubicación: ${e.message}")
+            Toast.makeText(this, "Error obteniendo ubicación: ${e.message}", Toast.LENGTH_SHORT).show()
             moveToDefaultLocation()
         }
+    }
+    
+    private fun isLocationRecent(location: Location): Boolean {
+        val currentTime = System.currentTimeMillis()
+        val locationTime = location.time
+        val timeDifference = currentTime - locationTime
+        // Considerar reciente si tiene menos de 30 minutos
+        val isRecent = timeDifference < 30 * 60 * 1000
+        println("DEBUG: Ubicación de hace ${timeDifference / 1000 / 60} minutos, es reciente: $isRecent")
+        return isRecent
     }
     
     private fun moveToLocation(lat: Double, lon: Double) {

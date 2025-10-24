@@ -115,13 +115,29 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
                         applyFilters()
                     }
                     
-                    // También buscar direcciones si la búsqueda parece ser una dirección
+                    // Siempre intentar geocoding para direcciones
                     if (isAddressQuery(query)) {
+                        println("DEBUG: Detectada búsqueda de dirección: '$query'")
                         val addressResults = repository.searchAddress(query)
                         if (addressResults.isNotEmpty()) {
+                            println("DEBUG: Direcciones encontradas: ${addressResults.size}")
                             val currentPlaces = _places.value ?: emptyList()
                             _places.value = currentPlaces + addressResults
                             applyFilters()
+                        } else {
+                            println("DEBUG: No se encontraron direcciones para: '$query'")
+                        }
+                    } else {
+                        // También intentar geocoding para búsquedas generales que podrían ser direcciones
+                        if (query.length > 5 && query.contains(Regex("\\d+"))) {
+                            println("DEBUG: Intentando geocoding para búsqueda general: '$query'")
+                            val addressResults = repository.searchAddress(query)
+                            if (addressResults.isNotEmpty()) {
+                                println("DEBUG: Direcciones encontradas en búsqueda general: ${addressResults.size}")
+                                val currentPlaces = _places.value ?: emptyList()
+                                _places.value = currentPlaces + addressResults
+                                applyFilters()
+                            }
                         }
                     }
                 }
@@ -135,10 +151,25 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
      * Determina si la consulta parece ser una dirección
      */
     private fun isAddressQuery(query: String): Boolean {
-        val addressKeywords = listOf("calle", "carrera", "avenida", "avenue", "street", "road", "casa", "apartamento", "edificio", "centro", "norte", "sur", "este", "oeste")
-        return addressKeywords.any { keyword -> 
+        val addressKeywords = listOf(
+            "calle", "carrera", "avenida", "avenue", "street", "road", 
+            "casa", "apartamento", "edificio", "centro", "norte", "sur", "este", "oeste",
+            "barrio", "sector", "zona", "localidad", "chapinero", "usaquen", "suba",
+            "kennedy", "bosa", "ciudad bolivar", "san cristobal", "santa fe",
+            "teusaquillo", "mártires", "antonio nariño", "puente aranda",
+            "rafael uribe uribe", "sumapaz", "fontibon", "engativa"
+        )
+        
+        val hasAddressKeyword = addressKeywords.any { keyword -> 
             query.lowercase().contains(keyword.lowercase()) 
-        } || query.contains(Regex("\\d+")) // Contiene números
+        }
+        
+        val hasNumbers = query.contains(Regex("\\d+")) // Contiene números
+        val hasCardinalDirection = query.contains(Regex("(norte|sur|este|oeste)", RegexOption.IGNORE_CASE))
+        
+        // Es dirección si tiene palabras clave de dirección, números, o direcciones cardinales
+        return hasAddressKeyword || (hasNumbers && hasCardinalDirection) || 
+               query.contains(Regex("(calle|carrera)\\s*\\d+", RegexOption.IGNORE_CASE))
     }
     
     /**
