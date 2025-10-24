@@ -12,231 +12,237 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- App Bar con búsqueda -->
-    <com.google.android.material.appbar.AppBarLayout
+    <!-- Contenedor principal de UI -->
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar">
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
-        <com.google.android.material.appbar.MaterialToolbar
-            android:id="@+id/toolbar"
-            android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            android:background="@color/white"
-            app:title="Mapa de Lugares"
-            app:titleTextColor="@color/black" />
-
-        <!-- SearchView -->
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/searchContainer"
+        <!-- Barra de búsqueda flotante -->
+        <androidx.cardview.widget.CardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="16dp"
-            android:hint="Buscar lugares..."
-            app:boxStrokeColor="@color/primary"
-            app:hintTextColor="@color/primary">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/searchEditText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="text"
-                android:maxLines="1" />
-
-        </com.google.android.material.textfield.TextInputLayout>
-
-    </com.google.android.material.appbar.AppBarLayout>
-
-    <!-- Filtros flotantes -->
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/fabFilters"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="end|bottom"
-        android:layout_margin="16dp"
-        android:layout_marginBottom="80dp"
-        android:src="@drawable/ic_filter"
-        app:backgroundTint="@color/primary"
-        app:tint="@color/white" />
-
-    <!-- FAB para cambiar modo de visualización -->
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/fabViewMode"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="end|bottom"
-        android:layout_margin="16dp"
-        android:layout_marginBottom="140dp"
-        android:src="@drawable/ic_layers"
-        app:backgroundTint="@color/secondary"
-        app:tint="@color/white" />
-
-    <!-- FAB para ubicación actual -->
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/fabLocation"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="end|bottom"
-        android:layout_margin="16dp"
-        android:layout_marginBottom="200dp"
-        android:src="@drawable/ic_my_location"
-        app:backgroundTint="@color/accent"
-        app:tint="@color/white" />
-
-    <!-- Bottom Sheet para detalles del lugar -->
-    <LinearLayout
-        android:id="@+id/bottomSheetContent"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="@drawable/bottom_sheet_background"
-        android:orientation="vertical"
-        android:padding="16dp"
-        android:visibility="gone">
-
-        <!-- Header del lugar -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/placeName"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Nombre del Lugar"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:textColor="@color/black" />
-
-            <ImageButton
-                android:id="@+id/btnFavorite"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_favorite_border"
-                android:contentDescription="Agregar a favoritos" />
-
-            <ImageButton
-                android:id="@+id/btnClose"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_close"
-                android:contentDescription="Cerrar" />
-
-        </LinearLayout>
-
-        <!-- Tipo y descripción -->
-        <TextView
-            android:id="@+id/placeType"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/type_chip_background"
-            android:padding="8dp"
-            android:text="Turístico"
-            android:textColor="@color/white"
-            android:textSize="12sp" />
-
-        <TextView
-            android:id="@+id/placeDescription"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Descripción del lugar"
-            android:textColor="@color/gray"
-            android:textSize="14sp" />
-
-        <!-- Información adicional -->
-        <LinearLayout
-            android:id="@+id/placeInfo"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <TextView
-                android:id="@+id/placeAddress"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:drawableStart="@drawable/ic_location"
-                android:drawablePadding="8dp"
-                android:text="Dirección"
-                android:textColor="@color/gray"
-                android:textSize="14sp" />
-
-            <TextView
-                android:id="@+id/placePhone"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:drawableStart="@drawable/ic_phone"
-                android:drawablePadding="8dp"
-                android:text="Teléfono"
-                android:textColor="@color/gray"
-                android:textSize="14sp" />
-
-            <TextView
-                android:id="@+id/placeWebsite"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:drawableStart="@drawable/ic_web"
-                android:drawablePadding="8dp"
-                android:text="Sitio web"
-                android:textColor="@color/primary"
-                android:textSize="14sp" />
-
-        </LinearLayout>
-
-        <!-- Calidad del aire (si aplica) -->
-        <LinearLayout
-            android:id="@+id/airQualityInfo"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Calidad del Aire"
-                android:textStyle="bold"
-                android:textColor="@color/black"
-                android:textSize="16sp" />
+            app:cardCornerRadius="24dp"
+            app:cardElevation="4dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:gravity="center_vertical">
+                android:padding="8dp">
 
-                <TextView
-                    android:id="@+id/airQualityIndex"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:background="@drawable/air_quality_background"
-                    android:padding="12dp"
-                    android:text="85"
-                    android:textColor="@color/white"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
+                <!-- Icono de búsqueda -->
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:contentDescription="@string/search_places_hint"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_location"
+                    app:tint="@color/primary" />
 
-                <TextView
-                    android:id="@+id/airQualityLevel"
+                <!-- Campo de búsqueda -->
+                <EditText
+                    android:id="@+id/searchEditText"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="12dp"
                     android:layout_weight="1"
-                    android:text="Moderado"
-                    android:textColor="@color/black"
+                    android:background="@null"
+                    android:hint="@string/search_places_hint"
+                    android:imeOptions="actionSearch"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
                     android:textSize="16sp" />
+
+                <!-- Botón limpiar -->
+                <ImageButton
+                    android:id="@+id/btnClearSearch"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/close"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_close"
+                    android:visibility="gone"
+                    app:tint="@android:color/darker_gray" />
 
             </LinearLayout>
 
-        </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- Carousel Top 3 (horizontal) -->
+        <androidx.cardview.widget.CardView
+            android:id="@+id/topResultsCarousel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:visibility="gone"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="4dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@color/primary"
+                    android:padding="12dp"
+                    android:text="Top 3 Resultados"
+                    android:textColor="@android:color/white"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <androidx.viewpager2.widget.ViewPager2
+                    android:id="@+id/topResultsViewPager"
+                    android:layout_width="match_parent"
+                    android:layout_height="180dp"
+                    android:clipToPadding="false"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp" />
+
+            </LinearLayout>
+
+        </androidx.cardview.widget.CardView>
+
+        <!-- Lista de resultados (se muestra al buscar) -->
+        <androidx.cardview.widget.CardView
+            android:id="@+id/resultsCard"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginStart="16dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="16dp"
+            android:layout_weight="1"
+            android:visibility="gone"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="4dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical">
+
+                <!-- Header de resultados -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@color/primary"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Todos los Resultados"
+                        android:textColor="@android:color/white"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvResultsCount"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:textColor="@android:color/white"
+                        android:textSize="14sp"
+                        tools:text="12 lugares" />
+
+                    <ImageButton
+                        android:id="@+id/btnCloseResults"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/close"
+                        android:padding="4dp"
+                        android:src="@drawable/ic_close"
+                        app:tint="@android:color/white" />
+
+                </LinearLayout>
+
+                <!-- RecyclerView de lugares -->
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/rvPlaces"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:clipToPadding="false"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    tools:itemCount="5"
+                    tools:listitem="@layout/item_place" />
+
+                <!-- Estado vacío -->
+                <LinearLayout
+                    android:id="@+id/emptyState"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="32dp"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:layout_width="80dp"
+                        android:layout_height="80dp"
+                        android:alpha="0.3"
+                        android:contentDescription="@string/no_places_found"
+                        android:src="@drawable/ic_location"
+                        app:tint="@android:color/darker_gray" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/no_places_found"
+                        android:textColor="@android:color/darker_gray"
+                        android:textSize="16sp" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </androidx.cardview.widget.CardView>
+
+    </LinearLayout>
+
+    <!-- FABs flotantes (derecha inferior) -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|bottom"
+        android:layout_margin="16dp"
+        android:orientation="vertical">
+
+        <!-- FAB para ubicación actual -->
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/fabLocation"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:contentDescription="@string/my_location"
+            android:src="@drawable/ic_my_location"
+            app:backgroundTint="@color/accent"
+            app:tint="@android:color/white" />
+
+        <!-- FAB para filtros -->
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/fabFilters"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:contentDescription="@string/filter_places"
+            android:src="@drawable/ic_filter"
+            app:backgroundTint="@color/primary"
+            app:tint="@android:color/white" />
 
     </LinearLayout>
 

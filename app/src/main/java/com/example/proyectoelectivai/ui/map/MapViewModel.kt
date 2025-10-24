@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
+import com.example.proyectoelectivai.data.cache.BoundingBox
 import com.example.proyectoelectivai.data.model.Place
 import com.example.proyectoelectivai.data.repository.PlacesRepository
 import kotlinx.coroutines.flow.Flow
@@ -15,7 +16,7 @@ import kotlinx.coroutines.launch
 
 /**
  * ViewModel para el mapa principal
- * Maneja el estado de los lugares, filtros y búsquedas
+ * Maneja carga de datos basada en viewport
  */
 class MapViewModel(application: Application) : AndroidViewModel(application) {
     
@@ -51,14 +52,48 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedPlace = MutableLiveData<Place?>()
     val selectedPlace: LiveData<Place?> = _selectedPlace
     
-    init {
-        loadAllPlaces()
-        // Cargar datos de ejemplo
-        loadSampleData()
+    // Viewport actual
+    private var currentViewport: BoundingBox? = null
+    
+    /**
+     * Configura el centro del área offline
+     */
+    fun setOfflineCenter(lat: Double, lon: Double) {
+        repository.setOfflineCenter(lat, lon)
     }
     
     /**
-     * Carga todos los lugares
+     * Carga lugares para un viewport específico
+     * Este es el método principal que se llama cuando el mapa se mueve
+     */
+    fun loadPlacesForViewport(minLat: Double, maxLat: Double, minLon: Double, maxLon: Double) {
+        val boundingBox = BoundingBox(minLat, maxLat, minLon, maxLon)
+        currentViewport = boundingBox
+        
+        viewModelScope.launch {
+            try {
+                _isLoading.value = true
+                _error.value = null
+                
+                // Verificar modo offline
+                if (!repository.isOnline()) {
+                    _error.value = "Modo offline: mostrando solo lugares guardados"
+                }
+                
+                repository.getPlacesInViewport(boundingBox).collect { placesList ->
+                    _places.value = placesList
+                    applyFilters()
+                    _isLoading.value = false  // Ocultar loading después de recibir datos
+                }
+            } catch (e: Exception) {
+                _error.value = "Error cargando lugares: ${e.message}"
+                _isLoading.value = false
+            }
+        }
+    }
+    
+    /**
+     * Carga todos los lugares guardados (para vista inicial)
      */
     fun loadAllPlaces() {
         viewModelScope.launch {
@@ -69,10 +104,10 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
                 repository.getAllPlaces().collect { placesList ->
                     _places.value = placesList
                     applyFilters()
+                    _isLoading.value = false  // Ocultar loading después de recibir datos
                 }
             } catch (e: Exception) {
                 _error.value = "Error cargando lugares: ${e.message}"
-            } finally {
                 _isLoading.value = false
             }
         }
@@ -90,9 +125,30 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
                 repository.getPlacesByType(type).collect { placesList ->
                     _places.value = placesList
                     applyFilters()
+                    _isLoading.value = false  // Ocultar loading después de recibir datos
                 }
             } catch (e: Exception) {
                 _error.value = "Error cargando lugares por tipo: ${e.message}"
+                _isLoading.value = false
+            }
+        }
+    }
+    
+    /**
+     * Precarga un área para uso offline
+     */
+    fun preloadArea(minLat: Double, maxLat: Double, minLon: Double, maxLon: Double) {
+        val boundingBox = BoundingBox(minLat, maxLat, minLon, maxLon)
+        
+        viewModelScope.launch {
+            try {
+                _isLoading.value = true
+                _error.value = null
+                
+                repository.preloadArea(boundingBox)
+                _error.value = "Área descargada para uso offline"
+            } catch (e: Exception) {
+                _error.value = "Error descargando área: ${e.message}"
             } finally {
                 _isLoading.value = false
             }
@@ -100,76 +156,65 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     /**
-     * Busca lugares
+     * Busca lugares globalmente (estilo YouTube)
+     * Primero busca local, luego amplía progresivamente hasta todo el mundo
      */
     fun searchPlaces(query: String) {
         _searchQuery.value = query
         viewModelScope.launch {
             try {
                 if (query.isBlank()) {
-                    loadAllPlaces()
-                } else {
-                    // Primero buscar en lugares existentes
-                    repository.searchPlaces(query).collect { placesList ->
-                        _places.value = placesList
-                        applyFilters()
+                    // Si está vacío, cargar viewport actual o todos
+                    currentViewport?.let {
+                        loadPlacesForViewport(it.minLat, it.maxLat, it.minLon, it.maxLon)
+                    } ?: loadAllPlaces()
+                } else if (query.length >= 3) {
+                    _isLoading.value = true
+                    _error.value = null
+                    
+                    // Verificar modo offline
+                    val isOffline = !repository.isOnline()
+                    if (isOffline) {
+                        _error.value = "Modo offline: buscando solo en lugares guardados"
                     }
                     
-                    // Siempre intentar geocoding para direcciones
-                    if (isAddressQuery(query)) {
-                        println("DEBUG: Detectada búsqueda de dirección: '$query'")
-                        val addressResults = repository.searchAddress(query)
-                        if (addressResults.isNotEmpty()) {
-                            println("DEBUG: Direcciones encontradas: ${addressResults.size}")
-                            val currentPlaces = _places.value ?: emptyList()
-                            _places.value = currentPlaces + addressResults
+                    // Primero buscar en DB local (tomar solo el primer valor)
+                    val localPlaces = repository.searchPlaces(query)
+                    var firstEmissionReceived = false
+                    
+                    localPlaces.collect { places ->
+                        if (!firstEmissionReceived) {
+                            _places.value = places
                             applyFilters()
-                        } else {
-                            println("DEBUG: No se encontraron direcciones para: '$query'")
-                        }
-                    } else {
-                        // También intentar geocoding para búsquedas generales que podrían ser direcciones
-                        if (query.length > 5 && query.contains(Regex("\\d+"))) {
-                            println("DEBUG: Intentando geocoding para búsqueda general: '$query'")
-                            val addressResults = repository.searchAddress(query)
-                            if (addressResults.isNotEmpty()) {
-                                println("DEBUG: Direcciones encontradas en búsqueda general: ${addressResults.size}")
-                                val currentPlaces = _places.value ?: emptyList()
-                                _places.value = currentPlaces + addressResults
-                                applyFilters()
+                            firstEmissionReceived = true
+                            
+                            // Luego buscar globalmente si tenemos ubicación Y hay internet
+                            if (!isOffline) {
+                                currentViewport?.let { viewport ->
+                                    val centerLat = (viewport.minLat + viewport.maxLat) / 2
+                                    val centerLon = (viewport.minLon + viewport.maxLon) / 2
+                                    
+                                    val globalPlaces = repository.searchPlacesGlobal(query, centerLat, centerLon)
+                                    
+                                    if (globalPlaces.isNotEmpty()) {
+                                        // Combinar resultados locales y globales, sin duplicados
+                                        val currentPlaces = _places.value ?: emptyList()
+                                        val combined = (currentPlaces + globalPlaces).distinctBy { it.id }
+                                        _places.value = combined
+                                        applyFilters()
+                                    }
+                                }
                             }
+                            
+                            _isLoading.value = false
                         }
                     }
                 }
             } catch (e: Exception) {
                 _error.value = "Error buscando lugares: ${e.message}"
+                _isLoading.value = false
             }
         }
-    }
-    
-    /**
-     * Determina si la consulta parece ser una dirección
-     */
-    private fun isAddressQuery(query: String): Boolean {
-        val addressKeywords = listOf(
-            "calle", "carrera", "avenida", "avenue", "street", "road", 
-            "casa", "apartamento", "edificio", "centro", "norte", "sur", "este", "oeste",
-            "barrio", "sector", "zona", "localidad", "chapinero", "usaquen", "suba",
-            "kennedy", "bosa", "ciudad bolivar", "san cristobal", "santa fe",
-            "teusaquillo", "mártires", "antonio nariño", "puente aranda",
-            "rafael uribe uribe", "sumapaz", "fontibon", "engativa"
-        )
-        
-        val hasAddressKeyword = addressKeywords.any { keyword -> 
-            query.lowercase().contains(keyword.lowercase()) 
-        }
-        
-        val hasNumbers = query.contains(Regex("\\d+")) // Contiene números
-        val hasCardinalDirection = query.contains(Regex("(norte|sur|este|oeste)", RegexOption.IGNORE_CASE))
-        
-        // Es dirección si tiene palabras clave de dirección, números, o direcciones cardinales
-        return hasAddressKeyword || (hasNumbers && hasCardinalDirection) || 
-               query.contains(Regex("(calle|carrera)\\s*\\d+", RegexOption.IGNORE_CASE))
     }
     
     /**
@@ -254,29 +299,6 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         return repository.getFavoritePlaces()
     }
     
-    /**
-     * Obtiene lugares en un área específica
-     */
-    fun getPlacesInBounds(
-        minLat: Double, maxLat: Double, 
-        minLon: Double, maxLon: Double
-    ) {
-        viewModelScope.launch {
-            try {
-                _isLoading.value = true
-                _error.value = null
-                
-                repository.getPlacesInBounds(minLat, maxLat, minLon, maxLon).collect { placesList ->
-                    _places.value = placesList
-                    applyFilters()
-                }
-            } catch (e: Exception) {
-                _error.value = "Error cargando lugares en área: ${e.message}"
-            } finally {
-                _isLoading.value = false
-            }
-        }
-    }
     
     /**
      * Obtiene estadísticas de lugares
@@ -294,21 +316,29 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     /**
-     * Refresca los datos
+     * Refresca los datos del viewport actual
      */
     fun refresh() {
-        loadAllPlaces()
+        currentViewport?.let {
+            loadPlacesForViewport(it.minLat, it.maxLat, it.minLon, it.maxLon)
+        } ?: loadAllPlaces()
     }
     
     /**
-     * Carga datos de ejemplo
+     * Obtiene información del caché
      */
-    private fun loadSampleData() {
+    fun getCacheInfo() = repository.getCacheInfo()
+    
+    /**
+     * Limpia el caché
+     */
+    fun clearCache() {
         viewModelScope.launch {
             try {
-                repository.loadSampleData()
+                repository.clearCache()
+                _error.value = "Caché limpiado"
             } catch (e: Exception) {
-                _error.value = "Error cargando datos de ejemplo: ${e.message}"
+                _error.value = "Error limpiando caché: ${e.message}"
             }
         }
     }

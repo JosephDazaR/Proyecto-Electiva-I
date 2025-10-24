@@ -11,6 +11,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.View
+import android.widget.EditText
+import android.widget.ImageButton
+import android.widget.ProgressBar
+import android.widget.TextView
+import androidx.cardview.widget.CardView
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.ViewPager2
 import com.example.proyectoelectivai.R
 import com.example.proyectoelectivai.data.model.Place
 import org.maplibre.android.MapLibre
@@ -19,8 +30,9 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
-import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
@@ -36,6 +48,21 @@ class MapActivity : AppCompatActivity() {
     private lateinit var mapLibreMap: MapLibreMap
     private lateinit var viewModel: MapViewModel
     private lateinit var locationManager: LocationManager
+    
+    // UI Components
+    private lateinit var searchEditText: EditText
+    private lateinit var btnClearSearch: ImageButton
+    private lateinit var topResultsCarousel: CardView
+    private lateinit var topResultsViewPager: ViewPager2
+    private lateinit var resultsCard: CardView
+    private lateinit var rvPlaces: RecyclerView
+    private lateinit var tvResultsCount: TextView
+    private lateinit var emptyState: View
+    private lateinit var progressBar: ProgressBar
+    
+    // Adapters
+    private lateinit var placesAdapter: PlacesAdapter
+    private lateinit var top3Adapter: PlacesAdapter
     
     private var currentLocation: Location? = null
     
@@ -73,11 +100,24 @@ class MapActivity : AppCompatActivity() {
         mapView = findViewById(R.id.mapView)
         mapView.onCreate(savedInstanceState)
         
+        searchEditText = findViewById(R.id.searchEditText)
+        btnClearSearch = findViewById(R.id.btnClearSearch)
+        topResultsCarousel = findViewById(R.id.topResultsCarousel)
+        topResultsViewPager = findViewById(R.id.topResultsViewPager)
+        resultsCard = findViewById(R.id.resultsCard)
+        rvPlaces = findViewById(R.id.rvPlaces)
+        tvResultsCount = findViewById(R.id.tvResultsCount)
+        emptyState = findViewById(R.id.emptyState)
+        progressBar = findViewById(R.id.progressBar)
+        
         // Inicializar ViewModel
         viewModel = ViewModelProvider(this)[MapViewModel::class.java]
         
         // Inicializar LocationManager
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        
+        // Configurar RecyclerView
+        setupRecyclerView()
         
         // Configurar mapa
         setupMap()
@@ -85,7 +125,103 @@ class MapActivity : AppCompatActivity() {
         // Configurar observadores
         setupObservers()
         
+        // Configurar búsqueda
+        setupSearch()
+        
         // NO solicitar permisos aquí, se hará cuando el mapa esté listo
+    }
+    
+    private fun setupRecyclerView() {
+        // Adapter principal para lista completa
+        placesAdapter = PlacesAdapter(
+            onPlaceClick = { place ->
+                // Al hacer clic en un lugar, centrarlo en el mapa y cerrar lista
+                moveToLocation(place.lat, place.lon)
+                viewModel.selectPlace(place)
+                hideResultsList()
+            },
+            onShowOnMapClick = { place ->
+                // Al hacer clic en "mostrar en mapa", centrar y resaltar
+                moveToLocation(place.lat, place.lon)
+                viewModel.selectPlace(place)
+            }
+        )
+        
+        rvPlaces.apply {
+            layoutManager = LinearLayoutManager(this@MapActivity)
+            adapter = placesAdapter
+        }
+        
+        // Adapter para carousel de Top 3
+        top3Adapter = PlacesAdapter(
+            onPlaceClick = { place ->
+                moveToLocation(place.lat, place.lon)
+                viewModel.selectPlace(place)
+                hideResultsList()
+            },
+            onShowOnMapClick = { place ->
+                moveToLocation(place.lat, place.lon)
+                viewModel.selectPlace(place)
+            }
+        )
+        
+        topResultsViewPager.adapter = top3Adapter
+        topResultsViewPager.offscreenPageLimit = 1
+        topResultsViewPager.setPageTransformer { page, position ->
+            page.scaleY = 0.85f + (1 - kotlin.math.abs(position)) * 0.15f
+        }
+        
+        // Botón cerrar lista
+        findViewById<ImageButton>(R.id.btnCloseResults).setOnClickListener {
+            hideResultsList()
+        }
+    }
+    
+    private fun setupSearch() {
+        searchEditText.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            
+            override fun afterTextChanged(s: Editable?) {
+                val query = s.toString()
+                
+                // Mostrar/ocultar botón limpiar
+                btnClearSearch.visibility = if (query.isNotEmpty()) View.VISIBLE else View.GONE
+                
+                // Buscar con debounce
+                searchHandler.removeCallbacks(searchRunnable)
+                
+                if (query.length > 2) {
+                    searchHandler.postDelayed(searchRunnable, 300)
+                } else if (query.isEmpty()) {
+                    viewModel.searchPlaces("")
+                    hideResultsList()
+                }
+            }
+        })
+        
+        btnClearSearch.setOnClickListener {
+            searchEditText.text.clear()
+            hideResultsList()
+        }
+    }
+    
+    private val searchHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val searchRunnable = Runnable {
+        val query = searchEditText.text.toString()
+        if (query.isNotEmpty()) {
+            viewModel.searchPlaces(query)
+            showResultsList()
+        }
+    }
+    
+    private fun showResultsList() {
+        resultsCard.visibility = View.VISIBLE
+    }
+    
+    private fun hideResultsList() {
+        topResultsCarousel.visibility = View.GONE
+        resultsCard.visibility = View.GONE
     }
     
     private fun setupMap() {
@@ -122,6 +258,9 @@ class MapActivity : AppCompatActivity() {
                 
                 // AHORA que el mapa está listo, solicitar permisos
                 requestLocationPermissions()
+                
+                // Cargar datos iniciales para el viewport
+                loadDataForCurrentViewport()
             }
             
             // Configurar listeners
@@ -134,29 +273,38 @@ class MapActivity : AppCompatActivity() {
         val placesSource = GeoJsonSource("places-source")
         style.addSource(placesSource)
         
-        // Crear capa de puntos
+        // Crear capa de puntos con colores según tipo
         val placesLayer = CircleLayer("places-layer", "places-source")
             .withProperties(
-                org.maplibre.android.style.layers.PropertyFactory.circleColor("#FF0000"),
-                org.maplibre.android.style.layers.PropertyFactory.circleRadius(12f),
-                org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth(3f),
-                org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor("#FFFFFF")
+                // Color según tipo de lugar
+                PropertyFactory.circleColor(
+                    Expression.match(Expression.get("type"),
+                        Expression.literal("#E91E63"), // Color por defecto (rosa)
+                        Expression.stop("museum", "#9C27B0"),      // Morado para museos
+                        Expression.stop("monument", "#FF5722"),     // Naranja para monumentos
+                        Expression.stop("attraction", "#FF9800"),   // Naranja claro para atracciones
+                        Expression.stop("artwork", "#F44336"),      // Rojo para arte
+                        Expression.stop("statue", "#FF5722"),       // Naranja para estatuas
+                        Expression.stop("park", "#4CAF50"),         // Verde para parques
+                        Expression.stop("viewpoint", "#03A9F4"),    // Azul para miradores
+                        Expression.stop("gallery", "#9C27B0"),      // Morado para galerías
+                        Expression.stop("zoo", "#8BC34A"),          // Verde claro para zoológicos
+                        Expression.stop("theme_park", "#FF9800"),   // Naranja claro para parques temáticos
+                        Expression.stop("castle", "#795548"),       // Marrón para castillos
+                        Expression.stop("ruins", "#9E9E9E"),        // Gris para ruinas
+                        Expression.stop("city", "#2196F3"),         // Azul para ciudades
+                        Expression.stop("town", "#03A9F4"),         // Azul claro para pueblos
+                        Expression.stop("village", "#81D4FA"),      // Azul muy claro para villas
+                        Expression.stop("hamlet", "#B3E5FC")        // Azul pastel para aldeas
+                    )
+                ),
+                PropertyFactory.circleRadius(10f),
+                PropertyFactory.circleStrokeWidth(2f),
+                PropertyFactory.circleStrokeColor("#FFFFFF"),
+                PropertyFactory.circleOpacity(0.9f)
             )
         
         style.addLayer(placesLayer)
-        
-        // Crear capa de símbolos para etiquetas
-        val labelsLayer = SymbolLayer("places-labels", "places-source")
-            .withProperties(
-                org.maplibre.android.style.layers.PropertyFactory.textField(org.maplibre.android.style.expressions.Expression.get("name")),
-                org.maplibre.android.style.layers.PropertyFactory.textSize(14f),
-                org.maplibre.android.style.layers.PropertyFactory.textColor("#000000"),
-                org.maplibre.android.style.layers.PropertyFactory.textHaloColor("#FFFFFF"),
-                org.maplibre.android.style.layers.PropertyFactory.textHaloWidth(2f),
-                org.maplibre.android.style.layers.PropertyFactory.textOffset(arrayOf(0f, -2f))
-            )
-        
-        style.addLayer(labelsLayer)
     }
     
     private fun setupMapListeners() {
@@ -165,16 +313,42 @@ class MapActivity : AppCompatActivity() {
             handleMapClick(point)
             true
         }
+        
+        // Listener para detectar cuando el mapa deja de moverse
+        mapLibreMap.addOnCameraIdleListener {
+            // Cargar datos para el viewport actual
+            loadDataForCurrentViewport()
+        }
+        
+        // Listener para detectar el inicio del movimiento
+        mapLibreMap.addOnCameraMoveStartedListener { reason ->
+            // Opcional: puedes mostrar un indicador de que se está moviendo
+            when (reason) {
+                MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE -> {
+                    // Movimiento por gestos del usuario
+                }
+                MapLibreMap.OnCameraMoveStartedListener.REASON_DEVELOPER_ANIMATION -> {
+                    // Movimiento por código
+                }
+                MapLibreMap.OnCameraMoveStartedListener.REASON_API_ANIMATION -> {
+                    // Animación de la API
+                }
+            }
+        }
     }
     
     private fun setupObservers() {
         // Observar lugares filtrados
         viewModel.filteredPlaces.observe(this) { places ->
             println("DEBUG: Lugares filtrados recibidos: ${places.size}")
-            places.forEach { place ->
-                println("DEBUG: Lugar: ${place.name} - ${place.type} - Lat: ${place.lat}, Lon: ${place.lon}")
-            }
+            
+            // Actualizar mapa
             updateMapWithPlaces(places)
+            
+            // Actualizar lista si está visible
+            if (resultsCard.visibility == View.VISIBLE) {
+                updatePlacesList(places)
+            }
         }
         
         // Observar lugar seleccionado
@@ -191,65 +365,57 @@ class MapActivity : AppCompatActivity() {
             }
         }
         
+        // Observar estado de carga
+        viewModel.isLoading.observe(this) { isLoading ->
+            progressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
+        }
+        
         // Configurar botones
         setupButtons()
     }
     
-    private fun setupButtons() {
-        // Botón de búsqueda con texto en tiempo real
-        val searchEditText = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.searchEditText)
-        searchEditText.setOnEditorActionListener { _, _, _ ->
-            val query = searchEditText.text.toString()
-            if (query.isNotEmpty()) {
-                println("DEBUG: Búsqueda manual: '$query'")
-                Toast.makeText(this, "Buscando: $query", Toast.LENGTH_SHORT).show()
-                viewModel.searchPlaces(query)
-            }
-            true
+    private fun updatePlacesList(places: List<Place>) {
+        if (places.isEmpty()) {
+            // Sin resultados
+            topResultsCarousel.visibility = View.GONE
+            resultsCard.visibility = View.GONE
+            return
         }
         
-        // Agregar placeholder más claro
-        searchEditText.hint = "Buscar: Museo, Parque, Calle 82, Carrera 7, Chapinero..."
+        // Top 3 en carousel (si hay suficientes)
+        if (places.size >= 3) {
+            val top3 = places.take(3)
+            top3Adapter.submitList(top3)
+            topResultsCarousel.visibility = View.VISIBLE
+        } else {
+            topResultsCarousel.visibility = View.GONE
+        }
         
-        // Búsqueda mientras escribes con debounce
-        val searchHandler = android.os.Handler(android.os.Looper.getMainLooper())
-        var searchRunnable: Runnable? = null
+        // Lista completa (todos los resultados)
+        placesAdapter.submitList(places)
         
-        searchEditText.addTextChangedListener(object : android.text.TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) {
-                val query = s.toString()
-                
-                // Cancelar búsqueda anterior
-                searchRunnable?.let { searchHandler.removeCallbacks(it) }
-                
-                if (query.length > 2) { // Buscar después de 3 caracteres
-                    searchRunnable = Runnable {
-                        println("DEBUG: Buscando: '$query'")
-                        Toast.makeText(this@MapActivity, "Buscando: $query", Toast.LENGTH_SHORT).show()
-                        viewModel.searchPlaces(query)
-                    }
-                    searchHandler.postDelayed(searchRunnable!!, 500) // Debounce de 500ms
-                } else if (query.isEmpty()) {
-                    println("DEBUG: Cargando todos los lugares")
-                    viewModel.loadAllPlaces() // Cargar todos si está vacío
-                }
-            }
-        })
+        // Actualizar contador
+        tvResultsCount.text = if (places.size == 1) {
+            "1 lugar"
+        } else {
+            "${places.size} lugares"
+        }
         
+        // Mostrar/ocultar estado vacío
+        if (places.isEmpty()) {
+            rvPlaces.visibility = View.GONE
+            emptyState.visibility = View.VISIBLE
+        } else {
+            rvPlaces.visibility = View.VISIBLE
+            emptyState.visibility = View.GONE
+        }
+    }
+    
+    private fun setupButtons() {
         // FAB de filtros
         findViewById<com.google.android.material.floatingactionbutton.FloatingActionButton>(R.id.fabFilters)
             .setOnClickListener {
-                // TODO: Abrir filtros
-                Toast.makeText(this, "Filtros", Toast.LENGTH_SHORT).show()
-            }
-        
-        // FAB de modo de vista
-        findViewById<com.google.android.material.floatingactionbutton.FloatingActionButton>(R.id.fabViewMode)
-            .setOnClickListener {
-                // TODO: Cambiar modo de vista
-                Toast.makeText(this, "Modo de vista", Toast.LENGTH_SHORT).show()
+                openFilters()
             }
         
         // FAB de ubicación
@@ -257,11 +423,6 @@ class MapActivity : AppCompatActivity() {
             .setOnClickListener {
                 // Verificar permisos antes de obtener ubicación
                 if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                    // Verificar si el GPS está habilitado
-                    if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) && 
-                        !locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                        Toast.makeText(this, "GPS y ubicación de red deshabilitados. Por favor, habilítalos en configuración.", Toast.LENGTH_LONG).show()
-                    }
                     getCurrentLocation()
                 } else {
                     // Solicitar permisos si no los tiene
@@ -275,12 +436,28 @@ class MapActivity : AppCompatActivity() {
             }
     }
     
+    private fun openFilters() {
+        val filterBottomSheet = FilterBottomSheet.newInstance(
+            selectedTypes = viewModel.selectedTypes.value,
+            viewMode = viewModel.viewMode.value
+        )
+        
+        filterBottomSheet.setOnFiltersChangedListener { types ->
+            viewModel.updateSelectedTypes(types)
+        }
+        
+        filterBottomSheet.setOnViewModeChangedListener { mode ->
+            viewModel.setViewMode(mode)
+        }
+        
+        filterBottomSheet.show(supportFragmentManager, "FilterBottomSheet")
+    }
+    
     private fun updateMapWithPlaces(places: List<Place>) {
         println("DEBUG: Actualizando mapa con ${places.size} lugares")
         
         mapLibreMap.getStyle { style ->
             val features = places.map { place ->
-                println("DEBUG: Creando feature para: ${place.name}")
                 Feature.fromGeometry(
                     Point.fromLngLat(place.lon, place.lat)
                 ).apply {
@@ -295,13 +472,6 @@ class MapActivity : AppCompatActivity() {
             if (source != null) {
                 source.setGeoJson(FeatureCollection.fromFeatures(features))
                 println("DEBUG: GeoJSON actualizado con ${features.size} features")
-                
-                // Si hay lugares, mover la cámara al primer lugar
-                if (places.isNotEmpty()) {
-                    val firstPlace = places.first()
-                    moveToLocation(firstPlace.lat, firstPlace.lon)
-                    Toast.makeText(this, "Encontrados ${places.size} lugares", Toast.LENGTH_SHORT).show()
-                }
             } else {
                 println("DEBUG: Error: No se encontró la fuente 'places-source'")
             }
@@ -412,6 +582,10 @@ class MapActivity : AppCompatActivity() {
                 if (bestLocation != null) {
                     currentLocation = bestLocation
                     moveToLocation(bestLocation.latitude, bestLocation.longitude)
+                    
+                    // Configurar área offline en el ViewModel
+                    viewModel.setOfflineCenter(bestLocation.latitude, bestLocation.longitude)
+                    
                     Toast.makeText(this, "Ubicación actual encontrada", Toast.LENGTH_SHORT).show()
                     return
                 }
@@ -425,6 +599,10 @@ class MapActivity : AppCompatActivity() {
                         println("DEBUG: Nueva ubicación recibida: ${location.latitude}, ${location.longitude}")
                         currentLocation = location
                         moveToLocation(location.latitude, location.longitude)
+                        
+                        // Configurar área offline en el ViewModel
+                        viewModel.setOfflineCenter(location.latitude, location.longitude)
+                        
                         Toast.makeText(this@MapActivity, "Ubicación actualizada", Toast.LENGTH_SHORT).show()
                         locationManager.removeUpdates(this)
                     }
@@ -500,7 +678,34 @@ class MapActivity : AppCompatActivity() {
     
     private fun moveToDefaultLocation() {
         // Bogotá por defecto
-        moveToLocation(4.7110, -74.0721)
+        val defaultLat = 4.7110
+        val defaultLon = -74.0721
+        moveToLocation(defaultLat, defaultLon)
+        
+        // Configurar área offline en Bogotá por defecto
+        viewModel.setOfflineCenter(defaultLat, defaultLon)
+    }
+    
+    /**
+     * Carga datos para el viewport actual del mapa
+     */
+    private fun loadDataForCurrentViewport() {
+        try {
+            val visibleRegion = mapLibreMap.projection.visibleRegion
+            val bounds = visibleRegion.latLngBounds
+            
+            val minLat = bounds.latitudeSouth
+            val maxLat = bounds.latitudeNorth
+            val minLon = bounds.longitudeWest
+            val maxLon = bounds.longitudeEast
+            
+            println("DEBUG: Cargando datos para viewport: [$minLat, $maxLat] x [$minLon, $maxLon]")
+            
+            // Cargar datos usando el ViewModel
+            viewModel.loadPlacesForViewport(minLat, maxLat, minLon, maxLon)
+        } catch (e: Exception) {
+            println("DEBUG: Error obteniendo viewport: ${e.message}")
+        }
     }
     
     override fun onStart() {

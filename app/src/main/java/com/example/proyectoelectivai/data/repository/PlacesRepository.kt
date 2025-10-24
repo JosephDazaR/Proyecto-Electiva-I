@@ -1,138 +1,406 @@
 package com.example.proyectoelectivai.data.repository
 
 import android.content.Context
+import android.util.Log
+import com.example.proyectoelectivai.data.cache.BoundingBox
+import com.example.proyectoelectivai.data.cache.OfflineAreaManager
+import com.example.proyectoelectivai.data.cache.ViewportCache
 import com.example.proyectoelectivai.data.local.AppDatabase
 import com.example.proyectoelectivai.data.local.PlaceDao
 import com.example.proyectoelectivai.data.model.*
-import com.example.proyectoelectivai.data.network.ApiService
-import com.example.proyectoelectivai.data.network.GeocodingService
-import com.example.proyectoelectivai.data.network.GeocodingResult
 import com.example.proyectoelectivai.data.network.NetworkModule
+import com.example.proyectoelectivai.data.network.OverpassApiService
+import com.example.proyectoelectivai.data.network.OverpassQueryBuilder
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
-import java.util.*
+import kotlinx.coroutines.withContext
 
 /**
- * Repositorio principal que maneja el cacheo inteligente
- * Si hay red: solicita datos a la API, guarda en Room, devuelve resultado
- * Si no hay red: devuelve datos almacenados en Room
+ * Repositorio simplificado que solo usa Overpass API
+ * Implementa caching inteligente basado en viewport
  */
 class PlacesRepository(private val context: Context) {
     
     private val database = AppDatabase.getDatabase(context)
     private val placeDao: PlaceDao = database.placeDao()
     
-    // Servicios API
-    private val openAQService = NetworkModule.createOpenAQService(context)
-    private val overpassService = NetworkModule.createOverpassService(context)
-    private val geocodingService = NetworkModule.createGeocodingService(context)
+    // Servicio API
+    private val overpassService: OverpassApiService = NetworkModule.createOverpassService(context)
+    
+    // Gestores de caché
+    private val viewportCache = ViewportCache(context)
+    private val offlineAreaManager = OfflineAreaManager(context)
     
     private val isNetworkAvailable: Boolean
         get() = NetworkModule.isNetworkAvailable(context)
     
     /**
-     * Obtiene todos los lugares con cacheo inteligente
+     * Verifica si hay conexión a internet
      */
-    suspend fun getAllPlaces(): Flow<List<Place>> {
-        return if (isNetworkAvailable) {
-            // Si hay red, actualizar datos y devolver
-            refreshAllData()
-            placeDao.getAllPlaces()
+    fun isOnline(): Boolean = isNetworkAvailable
+    
+    /**
+     * Configura el centro del área offline (ciudad del usuario)
+     */
+    fun setOfflineCenter(lat: Double, lon: Double, radiusMeters: Double = OfflineAreaManager.RADIUS_MEDIUM_CITY) {
+        offlineAreaManager.setOfflineCenter(lat, lon)
+        offlineAreaManager.setMaxRadius(radiusMeters)
+        Log.d(TAG, "Área offline configurada: $lat, $lon con radio ${radiusMeters}m")
+    }
+    
+    /**
+     * Obtiene lugares turísticos en un viewport específico
+     * - Si el área ya está en caché, devuelve datos de Room
+     * - Si no está en caché y hay red, descarga y guarda en Room
+     * - Si no hay red, devuelve lo que haya en Room para esa área
+     */
+    suspend fun getPlacesInViewport(boundingBox: BoundingBox): Flow<List<Place>> = withContext(Dispatchers.IO) {
+        Log.d(TAG, "Obteniendo lugares en viewport: $boundingBox")
+        
+        // Verificar si el área ya está en caché
+        val isCached = viewportCache.isAreaCached(
+            boundingBox.minLat, boundingBox.maxLat,
+            boundingBox.minLon, boundingBox.maxLon
+        )
+        
+        if (!isCached && isNetworkAvailable) {
+            // Área no cacheada y hay red: descargar datos
+            Log.d(TAG, "Área no cacheada, descargando desde Overpass...")
+            
+            // Verificar si el área está dentro del límite offline
+            val clippedBox = if (offlineAreaManager.isConfigured()) {
+                offlineAreaManager.clipToOfflineArea(boundingBox)
+            } else {
+                boundingBox
+            }
+            
+            if (clippedBox != null) {
+                downloadAndCachePlaces(clippedBox)
+            } else {
+                Log.d(TAG, "Área fuera del límite offline, usando solo datos locales")
+            }
+        } else if (isCached) {
+            Log.d(TAG, "Área ya en caché, usando datos locales")
         } else {
-            // Si no hay red, devolver datos cacheados
-            placeDao.getAllPlaces()
+            Log.d(TAG, "Sin red, usando datos locales disponibles")
+        }
+        
+        // Siempre devolver datos de Room
+        placeDao.getPlacesInBounds(
+            boundingBox.minLat, boundingBox.maxLat,
+            boundingBox.minLon, boundingBox.maxLon
+        )
+    }
+    
+    /**
+     * Descarga y cachea lugares turísticos para un área
+     */
+    private suspend fun downloadAndCachePlaces(boundingBox: BoundingBox) {
+        try {
+            // Construir query optimizada
+            val query = OverpassQueryBuilder.buildOptimalQuery(boundingBox)
+            Log.d(TAG, "Query Overpass: $query")
+            
+            // Llamar a la API
+            val response = overpassService.getTouristPlaces(query)
+                
+                if (response.isSuccessful) {
+                val elements = response.body()?.elements ?: emptyList()
+                Log.d(TAG, "Overpass devolvió ${elements.size} elementos")
+                
+                // Convertir elementos a Places
+                val places = elements.mapNotNull { element ->
+                    convertOverpassElementToPlace(element)
+                }
+                
+                Log.d(TAG, "Convertidos a ${places.size} lugares")
+                
+                // Guardar en Room
+                if (places.isNotEmpty()) {
+                    placeDao.insertPlaces(places)
+                    Log.d(TAG, "Guardados ${places.size} lugares en Room")
+                }
+                
+                // Marcar área como cacheada
+                viewportCache.markAreaAsCached(
+                    boundingBox.minLat, boundingBox.maxLat,
+                    boundingBox.minLon, boundingBox.maxLon
+                )
+                
+                Log.d(TAG, "Área marcada como cacheada")
+            } else {
+                Log.e(TAG, "Error en Overpass: ${response.code()} - ${response.message()}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error descargando lugares", e)
         }
     }
     
     /**
-     * Obtiene lugares por tipo con cacheo inteligente
+     * Convierte un elemento de Overpass a Place
      */
-    suspend fun getPlacesByType(type: String): Flow<List<Place>> {
-        return if (isNetworkAvailable) {
-            refreshDataByType(type)
-            placeDao.getPlacesByType(type)
-        } else {
-            placeDao.getPlacesByType(type)
-        }
+    private fun convertOverpassElementToPlace(element: OverpassElement): Place? {
+        val tags = element.tags ?: return null
+        
+        // Obtener nombre (requerido)
+        val name = tags["name"] ?: tags["name:es"] ?: tags["name:en"] ?: return null
+        
+        // Obtener coordenadas
+        val lat = element.lat
+        val lon = element.lon
+        
+        // Determinar tipo de lugar (ahora incluye ciudades)
+        val placeType = determinePlaceTypeExtended(tags)
+        val description = buildDescriptionExtended(tags, placeType)
+        
+        return Place(
+            id = "osm_${element.type}_${element.id}",
+            name = name,
+            type = placeType,
+            lat = lat,
+            lon = lon,
+            description = description,
+            address = buildAddress(tags),
+            phone = tags["phone"] ?: tags["contact:phone"],
+            website = tags["website"] ?: tags["contact:website"],
+            openingHours = tags["opening_hours"],
+            source = "overpass",
+            lastUpdated = System.currentTimeMillis()
+        )
     }
     
     /**
-     * Busca lugares con cacheo inteligente
+     * Determina el tipo de lugar extendido (incluye ciudades)
      */
-    suspend fun searchPlaces(query: String): Flow<List<Place>> {
+    private fun determinePlaceTypeExtended(tags: Map<String, String>): String {
+        // Primero intentar tipos turísticos conocidos
+        val touristType = TouristPlaceType.fromOsmTag(tags)
+        if (touristType != null) {
+            return touristType.value
+        }
+        
+        // Lugares (ciudades, pueblos, etc.)
+        tags["place"]?.let { place ->
+            return when (place) {
+                "city" -> "city"
+                "town" -> "town"
+                "village" -> "village"
+                "hamlet" -> "hamlet"
+                else -> place
+            }
+        }
+        
+        // Amenities
+        tags["amenity"]?.let { return it }
+        
+        // Shops
+        tags["shop"]?.let { return "shop" }
+        
+        // Por defecto
+        return "place"
+    }
+    
+    /**
+     * Construye descripción extendida
+     */
+    private fun buildDescriptionExtended(tags: Map<String, String>, placeType: String): String {
+        val parts = mutableListOf<String>()
+        
+        // Tipo de lugar traducido
+        val typeDisplay = when (placeType) {
+            "city" -> "Ciudad"
+            "town" -> "Pueblo"
+            "village" -> "Villa"
+            "hamlet" -> "Aldea"
+            "museum" -> "Museo"
+            "monument" -> "Monumento"
+            "attraction" -> "Atracción"
+            "park" -> "Parque"
+            "viewpoint" -> "Mirador"
+            "gallery" -> "Galería"
+            "zoo" -> "Zoológico"
+            "theme_park" -> "Parque Temático"
+            "statue" -> "Estatua"
+            "castle" -> "Castillo"
+            "ruins" -> "Ruinas"
+            "artwork" -> "Obra de Arte"
+            else -> placeType.replaceFirstChar { it.uppercase() }
+        }
+        parts.add(typeDisplay)
+        
+        // Descripción específica
+        tags["description"]?.let { parts.add(it) }
+        tags["description:es"]?.let { parts.add(it) }
+        
+        // Población para ciudades
+        tags["population"]?.let { parts.add("Población: $it") }
+        
+        // Información adicional
+        tags["heritage"]?.let { parts.add("Patrimonio: $it") }
+        tags["artist"]?.let { parts.add("Artista: $it") }
+        tags["architect"]?.let { parts.add("Arquitecto: $it") }
+        tags["start_date"]?.let { parts.add("Año: $it") }
+        tags["ele"]?.let { parts.add("Altitud: $it m") }
+        
+        return parts.joinToString(" • ")
+    }
+    
+    /**
+     * Construye dirección completa
+     */
+    private fun buildAddress(tags: Map<String, String>): String? {
+        val addressParts = mutableListOf<String>()
+        
+        tags["addr:street"]?.let { addressParts.add(it) }
+        tags["addr:housenumber"]?.let { 
+            if (addressParts.isNotEmpty()) {
+                addressParts[0] = "${addressParts[0]} $it"
+            } else {
+                addressParts.add(it)
+            }
+        }
+        tags["addr:city"]?.let { addressParts.add(it) }
+        tags["addr:state"]?.let { addressParts.add(it) }
+        tags["addr:country"]?.let { addressParts.add(it) }
+        
+        return if (addressParts.isNotEmpty()) {
+            addressParts.joinToString(", ")
+        } else {
+            tags["addr:full"]
+        }
+    }
+    
+    
+    /**
+     * Obtiene lugares por tipo
+     */
+    fun getPlacesByType(type: String): Flow<List<Place>> {
+        return placeDao.getPlacesByType(type)
+    }
+    
+    /**
+     * Busca lugares en la base de datos local
+     */
+    fun searchPlaces(query: String): Flow<List<Place>> {
         return placeDao.searchPlaces(query)
     }
     
     /**
-     * Busca direcciones usando geocoding
+     * Búsqueda global incremental (estilo YouTube)
+     * Primero busca cerca, luego amplía el radio progresivamente
      */
-    suspend fun searchAddress(query: String): List<Place> {
-        return try {
-            val enhancedQuery = query.trim().replace("  ", " ")
-            println("DEBUG: ===== INICIANDO BÚSQUEDA DE DIRECCIÓN =====")
-            println("DEBUG: Query original: '$query'")
-            println("DEBUG: Query mejorada: '$enhancedQuery'")
-            println("DEBUG: Red disponible: $isNetworkAvailable")
-            
-            if (isNetworkAvailable) {
-                println("DEBUG: Llamando a Nominatim API...")
-                val response = geocodingService.searchAddress(enhancedQuery)
-                println("DEBUG: Respuesta HTTP: ${response.code()}")
-                println("DEBUG: Mensaje: ${response.message()}")
+    suspend fun searchPlacesGlobal(
+        query: String,
+        centerLat: Double,
+        centerLon: Double
+    ): List<Place> = withContext(Dispatchers.IO) {
+        if (query.length < 3) {
+            return@withContext emptyList()
+        }
+        
+        val allResults = mutableListOf<Place>()
+        
+        // Si no hay red, solo retornar resultados ya cacheados en DB local
+        if (!isNetworkAvailable) {
+            Log.d(TAG, "Modo offline: buscando '$query' solo en base de datos local")
+            // Nota: los resultados ya están en la búsqueda local del ViewModel
+            return@withContext emptyList()
+        }
+        
+        Log.d(TAG, "Búsqueda global: '$query' desde ($centerLat, $centerLon)")
+        
+        // Radios incrementales: 5km, 20km, 50km, 100km, 500km, global
+        val radii = listOf(5000, 20000, 50000, 100000, 500000)
+        
+        for ((index, radius) in radii.withIndex()) {
+            try {
+                Log.d(TAG, "Buscando con radio ${radius}m...")
                 
-                if (response.isSuccessful) {
-                    val results = response.body() ?: emptyList()
-                    println("DEBUG: ✅ Nominatim devolvió ${results.size} resultados")
+                val queryStr = OverpassQueryBuilder.buildIncrementalSearchQuery(
+                    searchName = query,
+                    centerLat = centerLat,
+                    centerLon = centerLon,
+                    radiusMeters = radius,
+                limit = 20
+            )
+                
+                val response = overpassService.getTouristPlaces(queryStr)
+            
+            if (response.isSuccessful) {
+                    val elements = response.body()?.elements ?: emptyList()
+                    Log.d(TAG, "Radio ${radius}m: ${elements.size} elementos encontrados")
                     
-                    if (results.isNotEmpty()) {
-                        results.forEachIndexed { index, result ->
-                            println("DEBUG: Resultado $index: ${result.display_name}")
-                            println("DEBUG: Coordenadas: ${result.lat}, ${result.lon}")
+                    val places = elements.mapNotNull { convertOverpassElementToPlace(it) }
+                    
+                    // Añadir solo lugares únicos (evitar duplicados)
+                    places.forEach { place ->
+                        if (allResults.none { it.id == place.id }) {
+                            allResults.add(place)
                         }
                     }
                     
-                    val places = results.mapNotNull { result ->
-                        try {
-                            // Determinar el tipo de lugar basado en los tags
-                            val placeType = determinePlaceType(result)
-                            val placeName = result.namedetails?.name ?: result.display_name
-                            val description = buildDescription(result)
-                            
-                            Place(
-                                id = "geocoding_${result.place_id}",
-                                name = placeName,
-                                type = placeType,
-                                lat = result.lat.toDoubleOrNull() ?: 0.0,
-                                lon = result.lon.toDoubleOrNull() ?: 0.0,
-                                description = description,
-                                address = result.display_name,
-                                source = "geocoding"
-                            )
-                        } catch (e: Exception) {
-                            println("DEBUG: Error procesando resultado: ${e.message}")
-                            null
-                        }
+                    // Si encontramos suficientes resultados, detener
+                    if (allResults.size >= 20) {
+                        Log.d(TAG, "Suficientes resultados encontrados (${allResults.size})")
+                        break
                     }
-                    
-                    println("DEBUG: ✅ Lugares creados: ${places.size}")
-                    places
-                } else {
-                    val errorBody = response.errorBody()?.string() ?: "Sin detalles"
-                    println("DEBUG: ❌ Nominatim falló con código ${response.code()}")
-                    println("DEBUG: Error body: $errorBody")
-                    emptyList()
                 }
+                
+                // Si no encontramos nada en los primeros 2 intentos, intentar búsqueda global
+                if (allResults.isEmpty() && index == 1) {
+                    Log.d(TAG, "Sin resultados locales, intentando búsqueda global...")
+                    val globalResults = searchGlobalByName(query)
+                    allResults.addAll(globalResults)
+                    break
+                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error en búsqueda con radio $radius: ${e.message}")
+            }
+        }
+        
+        // Guardar en cache si hay resultados
+        if (allResults.isNotEmpty()) {
+            placeDao.insertPlaces(allResults)
+            Log.d(TAG, "Guardados ${allResults.size} lugares en cache")
+        }
+        
+        allResults
+    }
+    
+    /**
+     * Búsqueda global sin restricción de ubicación
+     */
+    private suspend fun searchGlobalByName(query: String): List<Place> {
+        return try {
+            val queryStr = OverpassQueryBuilder.buildGlobalSearchQuery(query, limit = 50)
+            val response = overpassService.getTouristPlaces(queryStr)
+            
+            if (response.isSuccessful) {
+                val elements = response.body()?.elements ?: emptyList()
+                Log.d(TAG, "Búsqueda global: ${elements.size} elementos")
+                elements.mapNotNull { convertOverpassElementToPlace(it) }
             } else {
-                println("DEBUG: Sin conexión, usando búsqueda local")
-                placeDao.searchPlaces(query).first()
+                emptyList()
             }
         } catch (e: Exception) {
-            println("DEBUG: ❌ EXCEPCIÓN en searchAddress: ${e.message}")
-            e.printStackTrace()
+            Log.e(TAG, "Error en búsqueda global: ${e.message}")
             emptyList()
-        } finally {
-            println("DEBUG: ===== FIN BÚSQUEDA DE DIRECCIÓN =====")
         }
+    }
+    
+    /**
+     * Obtiene todos los lugares guardados
+     */
+    fun getAllPlaces(): Flow<List<Place>> {
+        return placeDao.getAllPlaces()
+    }
+    
+    /**
+     * Actualiza el estado de favorito
+     */
+    suspend fun updateFavoriteStatus(id: String, isFavorite: Boolean) {
+        placeDao.updateFavoriteStatus(id, isFavorite)
     }
     
     /**
@@ -143,467 +411,75 @@ class PlacesRepository(private val context: Context) {
     }
     
     /**
-     * Obtiene lugares en un área específica
+     * Obtiene información del caché
      */
-    suspend fun getPlacesInBounds(
-        minLat: Double, maxLat: Double, 
-        minLon: Double, maxLon: Double
-    ): Flow<List<Place>> {
-        return if (isNetworkAvailable) {
-            refreshDataInBounds(minLat, maxLat, minLon, maxLon)
-            placeDao.getPlacesInBounds(minLat, maxLat, minLon, maxLon)
-        } else {
-            placeDao.getPlacesInBounds(minLat, maxLat, minLon, maxLon)
-        }
-    }
-    
-    /**
-     * Actualiza el estado de favorito de un lugar
-     */
-    suspend fun updateFavoriteStatus(id: String, isFavorite: Boolean) {
-        placeDao.updateFavoriteStatus(id, isFavorite)
-    }
-    
-    /**
-     * Refresca todos los datos desde las APIs
-     */
-    private suspend fun refreshAllData() {
-        try {
-            val currentTime = System.currentTimeMillis()
-            val places = mutableListOf<Place>()
-            
-            // Obtener datos de OpenAQ (calidad del aire)
-            places.addAll(fetchAirQualityData())
-            
-            // Obtener datos de OSM (lugares turísticos, parques, restaurantes, etc.)
-            places.addAll(fetchOSMData())
-            
-            // Guardar en base de datos
-            if (places.isNotEmpty()) {
-                placeDao.insertPlaces(places)
-            }
-            
-        } catch (e: Exception) {
-            // En caso de error, usar datos cacheados
-            println("Error refreshing data: ${e.message}")
-        }
-    }
-    
-    /**
-     * Refresca datos por tipo específico
-     */
-    private suspend fun refreshDataByType(type: String) {
-        try {
-            val places = when (type) {
-                "air_quality" -> fetchAirQualityData()
-                "tourist", "park", "restaurant", "cafe" -> fetchOSMData()
-                else -> emptyList()
-            }
-            
-            if (places.isNotEmpty()) {
-                placeDao.insertPlaces(places)
-            }
-        } catch (e: Exception) {
-            println("Error refreshing data for type $type: ${e.message}")
-        }
-    }
-    
-    /**
-     * Refresca datos en un área específica
-     */
-    private suspend fun refreshDataInBounds(
-        minLat: Double, maxLat: Double, 
-        minLon: Double, maxLon: Double
-    ) {
-        try {
-            val centerLat = (minLat + maxLat) / 2
-            val centerLon = (minLon + maxLon) / 2
-            val radius = calculateRadius(minLat, maxLat, minLon, maxLon)
-            
-            val places = mutableListOf<Place>()
-            places.addAll(fetchAirQualityData(centerLat, centerLon, radius))
-            places.addAll(fetchOSMDataInBounds(minLat, maxLat, minLon, maxLon))
-            
-            if (places.isNotEmpty()) {
-                placeDao.insertPlaces(places)
-            }
-        } catch (e: Exception) {
-            println("Error refreshing data in bounds: ${e.message}")
-        }
-    }
-    
-    
-    /**
-     * Obtiene datos de calidad del aire de OpenAQ
-     */
-    private suspend fun fetchAirQualityData(
-        lat: Double = 4.7110, 
-        lon: Double = -74.0721, 
-        radius: Int = 1000
-    ): List<Place> {
-        return try {
-            val response = openAQService.getAirQuality(
-                coordinates = "$lat,$lon",
-                radius = radius,
-                limit = 20
-            )
-            
-            if (response.isSuccessful) {
-                response.body()?.results?.mapNotNull { result ->
-                    val pm25Measurement = result.measurements.find { it.parameter == "pm25" }
-                    val pm10Measurement = result.measurements.find { it.parameter == "pm10" }
-                    
-                    if (pm25Measurement != null || pm10Measurement != null) {
-                        val aqi = pm25Measurement?.value?.toInt() ?: pm10Measurement?.value?.toInt() ?: 0
-                        Place(
-                            id = "air_${result.location}",
-                            name = result.location,
-                            type = "air_quality",
-                            lat = result.coordinates.latitude,
-                            lon = result.coordinates.longitude,
-                            description = "Air quality monitoring station",
-                            address = "${result.city}, ${result.country}",
-                            airQualityIndex = aqi,
-                            airQualityLevel = getAirQualityLevel(aqi),
-                            source = "openaq"
-                        )
-                    } else null
-                } ?: emptyList()
-            } else {
-                emptyList()
-            }
-        } catch (e: Exception) {
-            println("Error fetching air quality data: ${e.message}")
-            emptyList()
-        }
-    }
-    
-    /**
-     * Obtiene datos de OpenStreetMap (lugares turísticos, restaurantes, parques, etc.)
-     */
-    private suspend fun fetchOSMData(
-        lat: Double = 4.7110, 
-        lon: Double = -74.0721, 
-        radius: Int = 1000
-    ): List<Place> {
-        return try {
-            val bbox = calculateBoundingBox(lat, lon, radius)
-            fetchOSMDataInBounds(bbox.minLat, bbox.maxLat, bbox.minLon, bbox.maxLon)
-        } catch (e: Exception) {
-            println("Error fetching OSM data: ${e.message}")
-            emptyList()
-        }
-    }
-    
-    /**
-     * Obtiene datos de OSM en un área específica
-     */
-    private suspend fun fetchOSMDataInBounds(
-        minLat: Double, maxLat: Double, 
-        minLon: Double, maxLon: Double
-    ): List<Place> {
-        return try {
-            val query = """
-                [out:json][timeout:25];
-                (
-                  node["tourism"~"^(museum|attraction|monument|gallery|zoo|theme_park)$"]($minLat,$minLon,$maxLat,$maxLon);
-                  node["leisure"="park"]($minLat,$minLon,$maxLat,$maxLon);
-                  node["amenity"="restaurant"]($minLat,$minLon,$maxLat,$maxLon);
-                  node["amenity"="cafe"]($minLat,$minLon,$maxLat,$maxLon);
-                  node["amenity"="bar"]($minLat,$minLon,$maxLat,$maxLon);
-                  node["amenity"="fast_food"]($minLat,$minLon,$maxLat,$maxLon);
-                );
-                out geom;
-            """.trimIndent()
-            
-            val response = overpassService.getOSMData(query)
-            
-            if (response.isSuccessful) {
-                response.body()?.elements?.mapNotNull { element ->
-                    val tags = element.tags ?: return@mapNotNull null
-                    val type = when {
-                        tags["tourism"] in listOf("museum", "attraction", "monument", "gallery", "zoo", "theme_park") -> "tourist"
-                        tags["leisure"] == "park" -> "park"
-                        tags["amenity"] == "restaurant" -> "restaurant"
-                        tags["amenity"] == "cafe" -> "cafe"
-                        tags["amenity"] == "bar" -> "bar"
-                        tags["amenity"] == "fast_food" -> "fast_food"
-                        else -> "other"
-                    }
-                    
-                    Place(
-                        id = "osm_${element.type}_${element.id}",
-                        name = tags["name"] ?: "Unnamed $type",
-                        type = type,
-                        lat = element.lat,
-                        lon = element.lon,
-                        description = tags["description"] ?: tags["cuisine"] ?: tags["tourism"],
-                        address = tags["addr:street"],
-                        phone = tags["phone"],
-                        website = tags["website"],
-                        openingHours = tags["opening_hours"],
-                        source = "osm"
-                    )
-                } ?: emptyList()
-            } else {
-                emptyList()
-            }
-        } catch (e: Exception) {
-            println("Error fetching OSM data in bounds: ${e.message}")
-            emptyList()
-        }
-    }
-    
-    /**
-     * Calcula el nivel de calidad del aire basado en el índice
-     */
-    private fun getAirQualityLevel(aqi: Int): String {
-        return when {
-            aqi <= 50 -> "good"
-            aqi <= 100 -> "moderate"
-            aqi <= 150 -> "unhealthy_sensitive"
-            aqi <= 200 -> "unhealthy"
-            aqi <= 300 -> "very_unhealthy"
-            else -> "hazardous"
-        }
-    }
-    
-    /**
-     * Calcula el radio basado en las coordenadas
-     */
-    private fun calculateRadius(minLat: Double, maxLat: Double, minLon: Double, maxLon: Double): Int {
-        val latDiff = maxLat - minLat
-        val lonDiff = maxLon - minLon
-        val avgLat = (minLat + maxLat) / 2
+    fun getCacheInfo(): CacheInfo {
+        val cacheStats = viewportCache.getCacheStats()
+        val offlineInfo = offlineAreaManager.getOfflineAreaInfo()
         
-        // Conversión aproximada de grados a metros
-        val latMeters = latDiff * 111000
-        val lonMeters = lonDiff * 111000 * kotlin.math.cos(Math.toRadians(avgLat))
-        
-        return kotlin.math.max(latMeters, lonMeters).toInt()
-    }
-    
-    /**
-     * Calcula el bounding box para las coordenadas
-     */
-    private fun calculateBoundingBox(lat: Double, lon: Double, radius: Int): BoundingBox {
-        val latOffset = radius / 111000.0
-        val lonOffset = radius / (111000.0 * kotlin.math.cos(Math.toRadians(lat)))
-        
-        return BoundingBox(
-            minLat = lat - latOffset,
-            maxLat = lat + latOffset,
-            minLon = lon - lonOffset,
-            maxLon = lon + lonOffset
+        return CacheInfo(
+            cachedCells = cacheStats.cachedCells,
+            cachedAreaKm2 = cacheStats.approximateAreaKm2,
+            offlineConfigured = offlineInfo.isConfigured,
+            offlineCenterLat = offlineInfo.centerLat,
+            offlineCenterLon = offlineInfo.centerLon,
+            offlineRadiusKm = offlineInfo.radiusMeters / 1000.0
         )
     }
     
     /**
-     * Carga datos de ejemplo para Bogotá
+     * Limpia el caché
      */
-    suspend fun loadSampleData() {
-        try {
-            val samplePlaces = listOf(
-                Place(
-                    id = "sample_1",
-                    name = "Museo del Oro",
-                    type = "tourist",
-                    lat = 4.6019,
-                    lon = -74.0719,
-                    description = "Museo de arte precolombino con colección de oro",
-                    address = "Calle 16 #5-41, Bogotá",
-                    phone = "+57 1 343 2222",
-                    website = "https://www.banrepcultural.org/museo-del-oro",
-                    source = "sample"
-                ),
-                Place(
-                    id = "sample_2",
-                    name = "Parque Simón Bolívar",
-                    type = "park",
-                    lat = 4.6500,
-                    lon = -74.0833,
-                    description = "Parque urbano más grande de Bogotá",
-                    address = "Calle 63 #68-95, Bogotá",
-                    source = "sample"
-                ),
-                Place(
-                    id = "sample_3",
-                    name = "Andrés DC",
-                    type = "restaurant",
-                    lat = 4.6561,
-                    lon = -74.0597,
-                    description = "Restaurante tradicional colombiano",
-                    address = "Calle 82 #12-21, Bogotá",
-                    phone = "+57 1 616 8888",
-                    source = "sample"
-                ),
-                Place(
-                    id = "sample_4",
-                    name = "Café San Alberto",
-                    type = "cafe",
-                    lat = 4.6097,
-                    lon = -74.0817,
-                    description = "Café de especialidad colombiano",
-                    address = "Calle 93 #13-49, Bogotá",
-                    phone = "+57 1 616 1616",
-                    source = "sample"
-                ),
-                Place(
-                    id = "sample_5",
-                    name = "Catedral Primada",
-                    type = "tourist",
-                    lat = 4.5981,
-                    lon = -74.0758,
-                    description = "Catedral principal de Bogotá",
-                    address = "Carrera 7 #10-80, Bogotá",
-                    source = "sample"
-                ),
-                Place(
-                    id = "sample_6",
-                    name = "Estación de Monitoreo Aire Centro",
-                    type = "air_quality",
-                    lat = 4.6097,
-                    lon = -74.0817,
-                    description = "Estación de monitoreo de calidad del aire",
-                    address = "Centro de Bogotá",
-                    airQualityIndex = 45,
-                    airQualityLevel = "good",
-                    source = "sample"
-                ),
-                Place(
-                    id = "sample_7",
-                    name = "Centro Comercial Santafé",
-                    type = "shopping",
-                    lat = 4.6800,
-                    lon = -74.0500,
-                    description = "Centro comercial más grande de Bogotá",
-                    address = "Calle 183 #45-03, Bogotá",
-                    phone = "+57 1 644 0000",
-                    source = "sample"
-                ),
-                Place(
-                    id = "sample_8",
-                    name = "Zona Rosa",
-                    type = "entertainment",
-                    lat = 4.6561,
-                    lon = -74.0597,
-                    description = "Zona de entretenimiento y vida nocturna",
-                    address = "Calle 82 con Carrera 12, Bogotá",
-                    source = "sample"
-                ),
-                Place(
-                    id = "sample_9",
-                    name = "Chapinero",
-                    type = "neighborhood",
-                    lat = 4.6500,
-                    lon = -74.0600,
-                    description = "Barrio comercial y residencial",
-                    address = "Chapinero, Bogotá",
-                    source = "sample"
-                ),
-                Place(
-                    id = "sample_10",
-                    name = "Usaquén",
-                    type = "neighborhood",
-                    lat = 4.7000,
-                    lon = -74.0300,
-                    description = "Barrio histórico con plaza de mercado",
-                    address = "Usaquén, Bogotá",
-                    source = "sample"
-                )
-            )
-            
-            // Solo insertar si no hay datos
-            val count = placeDao.getPlacesCount()
-            if (count == 0) {
-                placeDao.insertPlaces(samplePlaces)
-                println("Datos de ejemplo cargados: ${samplePlaces.size} lugares")
-            }
-        } catch (e: Exception) {
-            println("Error cargando datos de ejemplo: ${e.message}")
-        }
+    suspend fun clearCache() {
+        viewportCache.clearCache()
+        Log.d(TAG, "Caché de viewport limpiado")
     }
     
     /**
-     * Determina el tipo de lugar basado en los tags de Nominatim
+     * Limpia todos los datos
      */
-    private fun determinePlaceType(result: GeocodingResult): String {
-        val tags = result.extratags
-        return when {
-            tags?.amenity != null -> when (tags.amenity) {
-                "restaurant", "cafe", "fast_food" -> "restaurant"
-                "hospital", "clinic" -> "health"
-                "school", "university" -> "education"
-                "bank", "atm" -> "finance"
-                "fuel" -> "gas_station"
-                else -> "amenity"
-            }
-            tags?.shop != null -> "shop"
-            tags?.tourism != null -> when (tags.tourism) {
-                "hotel", "hostel" -> "accommodation"
-                "museum", "gallery" -> "culture"
-                "attraction" -> "attraction"
-                else -> "tourism"
-            }
-            tags?.leisure != null -> when (tags.leisure) {
-                "park", "garden" -> "park"
-                "sports_centre", "stadium" -> "sports"
-                else -> "leisure"
-            }
-            tags?.historic != null -> "historic"
-            result.type == "house" -> "address"
-            result.type == "building" -> "building"
-            else -> "place"
-        }
+    suspend fun clearAllData() {
+        placeDao.deletePlacesBySource("overpass")
+        viewportCache.clearCache()
+        Log.d(TAG, "Todos los datos limpiados")
     }
     
     /**
-     * Construye una descripción detallada del lugar
+     * Precarga un área específica (útil para descargar offline)
      */
-    private fun buildDescription(result: GeocodingResult): String {
-        val tags = result.extratags
-        val address = result.address
+    suspend fun preloadArea(boundingBox: BoundingBox) {
+        Log.d(TAG, "Precargando área: $boundingBox")
         
-        val parts = mutableListOf<String>()
-        
-        // Agregar información del tipo de lugar
-        when {
-            tags?.amenity != null -> parts.add("📍 ${tags.amenity.replace("_", " ").uppercase()}")
-            tags?.shop != null -> parts.add("🛍️ ${tags.shop.replace("_", " ").uppercase()}")
-            tags?.tourism != null -> parts.add("🏛️ ${tags.tourism.replace("_", " ").uppercase()}")
-            tags?.leisure != null -> parts.add("🌳 ${tags.leisure.replace("_", " ").uppercase()}")
-            tags?.historic != null -> parts.add("🏛️ ${tags.historic.replace("_", " ").uppercase()}")
+        if (!isNetworkAvailable) {
+            Log.d(TAG, "Sin red, no se puede precargar")
+            return
         }
         
-        // Agregar información de contacto si está disponible
-        tags?.phone?.let { parts.add("📞 $it") }
-        tags?.website?.let { parts.add("🌐 Sitio web disponible") }
-        tags?.opening_hours?.let { parts.add("🕒 $it") }
-        
-        // Agregar información de dirección
-        address?.let { addr ->
-            val addressParts = mutableListOf<String>()
-            addr.road?.let { addressParts.add(it) }
-            addr.neighbourhood?.let { addressParts.add(it) }
-            addr.suburb?.let { addressParts.add(it) }
-            addr.city?.let { addressParts.add(it) }
-            
-            if (addressParts.isNotEmpty()) {
-                parts.add("📍 ${addressParts.joinToString(", ")}")
-            }
-        }
-        
-        return if (parts.isNotEmpty()) {
-            parts.joinToString(" • ")
+        // Verificar límite offline
+        val clippedBox = if (offlineAreaManager.isConfigured()) {
+            offlineAreaManager.clipToOfflineArea(boundingBox)
         } else {
-            "Lugar encontrado en ${result.display_name}"
+            boundingBox
+        }
+        
+        if (clippedBox != null) {
+            downloadAndCachePlaces(clippedBox)
         }
     }
     
-    private data class BoundingBox(
-        val minLat: Double,
-        val maxLat: Double,
-        val minLon: Double,
-        val maxLon: Double
-    )
+    companion object {
+        private const val TAG = "PlacesRepository"
+    }
 }
+
+/**
+ * Información del caché
+ */
+data class CacheInfo(
+    val cachedCells: Int,
+    val cachedAreaKm2: Double,
+    val offlineConfigured: Boolean,
+    val offlineCenterLat: Double,
+    val offlineCenterLon: Double,
+    val offlineRadiusKm: Double
+)

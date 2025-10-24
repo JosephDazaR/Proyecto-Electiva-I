@@ -23,37 +23,20 @@ object NetworkModule {
     private const val READ_TIMEOUT = 30L
     private const val WRITE_TIMEOUT = 30L
     
-    fun createOpenAQService(context: Context): ApiService {
+    /**
+     * Crea el servicio de Overpass API para lugares turísticos
+     */
+    fun createOverpassService(context: Context): OverpassApiService {
         val retrofit = Retrofit.Builder()
-            .baseUrl("https://api.openaq.org/")
-            .client(createOkHttpClient(context))
+            .baseUrl("https://overpass-api.de/api/")
+            .client(createOkHttpClient(context, timeoutSeconds = 60)) // Mayor timeout para Overpass
             .addConverterFactory(GsonConverterFactory.create())
             .build()
         
-        return retrofit.create(ApiService::class.java)
+        return retrofit.create(OverpassApiService::class.java)
     }
     
-    fun createOverpassService(context: Context): ApiService {
-        val retrofit = Retrofit.Builder()
-            .baseUrl("https://overpass-api.de/")
-            .client(createOkHttpClient(context))
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-        
-        return retrofit.create(ApiService::class.java)
-    }
-    
-    fun createGeocodingService(context: Context): GeocodingService {
-        val retrofit = Retrofit.Builder()
-            .baseUrl("https://nominatim.openstreetmap.org/")
-            .client(createOkHttpClient(context))
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-        
-        return retrofit.create(GeocodingService::class.java)
-    }
-    
-    private fun createOkHttpClient(context: Context): OkHttpClient {
+    private fun createOkHttpClient(context: Context, timeoutSeconds: Long = CONNECT_TIMEOUT): OkHttpClient {
         val cache = Cache(
             File(context.cacheDir, "http_cache"),
             CACHE_SIZE
@@ -63,7 +46,7 @@ object NetworkModule {
             level = HttpLoggingInterceptor.Level.BODY
         }
         
-        // Interceptor para User-Agent (OBLIGATORIO para Nominatim)
+        // Interceptor para User-Agent
         val userAgentInterceptor = Interceptor { chain ->
             val request = chain.request().newBuilder()
                 .header("User-Agent", "ProyectoElectivaI/1.0 (Android App)")
@@ -91,12 +74,12 @@ object NetworkModule {
         
         return OkHttpClient.Builder()
             .cache(cache)
-            .addInterceptor(userAgentInterceptor) // CRÍTICO: User-Agent para Nominatim
+            .addInterceptor(userAgentInterceptor)
             .addInterceptor(loggingInterceptor)
             .addInterceptor(offlineInterceptor)
-            .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
-            .readTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
-            .writeTimeout(WRITE_TIMEOUT, TimeUnit.SECONDS)
+            .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
+            .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
+            .writeTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .build()
     }
     

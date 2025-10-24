@@ -53,4 +53,8 @@
     <string name="refresh">Actualizar</string>
     <string name="share">Compartir</string>
     <string name="directions">Direcciones</string>
+    <string name="place_icon">Icono del lugar</string>
+    <string name="show_on_map">Mostrar en el mapa</string>
+    <string name="places_list">Lista de lugares</string>
+    <string name="results_count">%d lugares encontrados</string>
 </resources>

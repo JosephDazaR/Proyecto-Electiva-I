@@ -1,35 +1,11 @@
 package com.example.proyectoelectivai.data.model
 
 /**
- * Modelos de respuesta para las diferentes APIs
+ * Modelos de respuesta para Overpass API (OpenStreetMap)
+ * Estructura fija para lugares turísticos
  */
 
-// OpenAQ API Response
-data class OpenAQResponse(
-    val results: List<OpenAQResult>
-)
-
-data class OpenAQResult(
-    val location: String,
-    val city: String?,
-    val country: String,
-    val coordinates: OpenAQCoordinates,
-    val measurements: List<OpenAQMeasurement>
-)
-
-data class OpenAQCoordinates(
-    val latitude: Double,
-    val longitude: Double
-)
-
-data class OpenAQMeasurement(
-    val parameter: String,
-    val value: Double,
-    val lastUpdated: String,
-    val unit: String
-)
-
-// Overpass API (OSM) Response
+// Overpass API Response
 data class OverpassResponse(
     val elements: List<OverpassElement>
 )
@@ -42,11 +18,41 @@ data class OverpassElement(
     val tags: Map<String, String>?
 )
 
-// Respuesta unificada para el repositorio
-data class PlacesApiResponse(
-    val touristPlaces: List<Place> = emptyList(),
-    val airQualityPlaces: List<Place> = emptyList(),
-    val osmPlaces: List<Place> = emptyList(),
-    val success: Boolean = true,
-    val error: String? = null
-)
+/**
+ * Tipos de lugares turísticos soportados
+ */
+enum class TouristPlaceType(val value: String, val displayName: String) {
+    MUSEUM("museum", "Museo"),
+    MONUMENT("monument", "Monumento"),
+    ATTRACTION("attraction", "Atracción"),
+    ARTWORK("artwork", "Obra de Arte"),
+    VIEWPOINT("viewpoint", "Mirador"),
+    PARK("park", "Parque"),
+    GALLERY("gallery", "Galería"),
+    ZOO("zoo", "Zoológico"),
+    THEME_PARK("theme_park", "Parque Temático"),
+    STATUE("statue", "Estatua"),
+    CASTLE("castle", "Castillo"),
+    RUINS("ruins", "Ruinas");
+    
+    companion object {
+        fun fromOsmTag(tags: Map<String, String>): TouristPlaceType? {
+            return when {
+                tags["tourism"] == "museum" -> MUSEUM
+                tags["tourism"] == "monument" -> MONUMENT
+                tags["tourism"] == "attraction" -> ATTRACTION
+                tags["tourism"] == "artwork" -> ARTWORK
+                tags["tourism"] == "viewpoint" -> VIEWPOINT
+                tags["tourism"] == "gallery" -> GALLERY
+                tags["tourism"] == "zoo" -> ZOO
+                tags["tourism"] == "theme_park" -> THEME_PARK
+                tags["leisure"] == "park" -> PARK
+                tags["historic"] == "monument" -> MONUMENT
+                tags["historic"] == "statue" -> STATUE
+                tags["historic"] == "castle" -> CASTLE
+                tags["historic"] == "ruins" -> RUINS
+                else -> null
+            }
+        }
+    }
+}

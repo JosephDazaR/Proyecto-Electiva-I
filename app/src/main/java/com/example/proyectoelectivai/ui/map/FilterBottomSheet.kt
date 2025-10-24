@@ -69,11 +69,18 @@ class FilterBottomSheet : BottomSheetDialogFragment() {
     
     private fun setupTypeFilters() {
         val typeChips = mapOf(
-            "tourist" to "Turístico",
-            "air_quality" to "Calidad del Aire",
-            "park" to "Parque",
-            "restaurant" to "Restaurante",
-            "cafe" to "Café"
+            "museum" to "Museos",
+            "monument" to "Monumentos",
+            "attraction" to "Atracciones",
+            "park" to "Parques",
+            "viewpoint" to "Miradores",
+            "gallery" to "Galerías",
+            "statue" to "Estatuas",
+            "castle" to "Castillos",
+            "ruins" to "Ruinas",
+            "zoo" to "Zoológicos",
+            "theme_park" to "Parques Temáticos",
+            "artwork" to "Arte"
         )
         
         typeChips.forEach { (type, label) ->
