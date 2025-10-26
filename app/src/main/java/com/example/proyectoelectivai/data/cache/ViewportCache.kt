@@ -2,6 +2,7 @@ package com.example.proyectoelectivai.data.cache
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.math.pow
@@ -31,9 +32,20 @@ class ViewportCache(context: Context) {
      * Verifica si un viewport ya fue descargado
      */
     suspend fun isAreaCached(minLat: Double, maxLat: Double, minLon: Double, maxLon: Double): Boolean {
-        return mutex.withLock {
-            val cells = getViewportCells(minLat, maxLat, minLon, maxLon)
-            cells.all { it in loadedAreas }
+        return try {
+            mutex.withLock {
+                val cells = getViewportCells(minLat, maxLat, minLon, maxLon)
+                if (cells.isEmpty()) {
+                    Log.w(TAG, "Viewport demasiado grande o inválido, considerando como no cacheado")
+                    false
+                } else {
+                    cells.all { it in loadedAreas }
+                }
+            }
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "OutOfMemoryError en isAreaCached, limpiando caché", e)
+            clearCache()
+            false
         }
     }
     
@@ -41,15 +53,22 @@ class ViewportCache(context: Context) {
      * Marca un viewport como descargado
      */
     suspend fun markAreaAsCached(minLat: Double, maxLat: Double, minLon: Double, maxLon: Double) {
-        mutex.withLock {
-            val cells = getViewportCells(minLat, maxLat, minLon, maxLon)
-            loadedAreas.addAll(cells)
-            saveCachedAreas()
-            
-            // Limpiar caché si hay demasiadas áreas (limitar memoria)
-            if (loadedAreas.size > MAX_CACHED_CELLS) {
-                cleanOldestAreas()
+        try {
+            mutex.withLock {
+                val cells = getViewportCells(minLat, maxLat, minLon, maxLon)
+                if (cells.isNotEmpty()) {
+                    loadedAreas.addAll(cells)
+                    saveCachedAreas()
+                    
+                    // Limpiar caché si hay demasiadas áreas (limitar memoria)
+                    if (loadedAreas.size > MAX_CACHED_CELLS) {
+                        cleanOldestAreas()
+                    }
+                }
             }
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "OutOfMemoryError en markAreaAsCached, limpiando caché", e)
+            clearCache()
         }
     }
     
@@ -57,12 +76,22 @@ class ViewportCache(context: Context) {
      * Obtiene las áreas que necesitan ser descargadas en un viewport
      */
     suspend fun getMissingAreas(minLat: Double, maxLat: Double, minLon: Double, maxLon: Double): List<BoundingBox> {
-        return mutex.withLock {
-            val cells = getViewportCells(minLat, maxLat, minLon, maxLon)
-            val missingCells = cells.filter { it !in loadedAreas }
-            
-            // Agrupar celdas adyacentes en bounding boxes más grandes
-            groupCellsIntoBoundingBoxes(missingCells)
+        return try {
+            mutex.withLock {
+                val cells = getViewportCells(minLat, maxLat, minLon, maxLon)
+                if (cells.isEmpty()) {
+                    Log.w(TAG, "Viewport demasiado grande, no se pueden obtener áreas faltantes")
+                    emptyList()
+                } else {
+                    val missingCells = cells.filter { it !in loadedAreas }
+                    // Agrupar celdas adyacentes en bounding boxes más grandes
+                    groupCellsIntoBoundingBoxes(missingCells)
+                }
+            }
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "OutOfMemoryError en getMissingAreas, limpiando caché", e)
+            clearCache()
+            emptyList()
         }
     }
     
@@ -89,16 +118,37 @@ class ViewportCache(context: Context) {
     
     /**
      * Obtiene todas las celdas que cubre un viewport
+     * Con protección contra bucles infinitos y límites de memoria
      */
     private fun getViewportCells(minLat: Double, maxLat: Double, minLon: Double, maxLon: Double): List<String> {
         val cells = mutableListOf<String>()
         
-        var lat = alignToGrid(minLat)
-        while (lat < maxLat) {
-            var lon = alignToGrid(minLon)
-            while (lon < maxLon) {
+        // Validar y limitar el rango para evitar bucles infinitos
+        val safeMinLat = minLat.coerceIn(-90.0, 90.0)
+        val safeMaxLat = maxLat.coerceIn(-90.0, 90.0)
+        val safeMinLon = minLon.coerceIn(-180.0, 180.0)
+        val safeMaxLon = maxLon.coerceIn(-180.0, 180.0)
+        
+        // Calcular el número aproximado de celdas para detectar áreas demasiado grandes
+        val latCells = ((safeMaxLat - safeMinLat) / GRID_SIZE).toInt()
+        val lonCells = ((safeMaxLon - safeMinLon) / GRID_SIZE).toInt()
+        val totalCells = latCells * lonCells
+        
+        // Limitar el número máximo de celdas para evitar OutOfMemoryError
+        if (totalCells > MAX_CELLS_PER_REQUEST) {
+            Log.w(TAG, "Viewport demasiado grande: $totalCells celdas. Limitando a ${MAX_CELLS_PER_REQUEST}")
+            return emptyList()
+        }
+        
+        var lat = alignToGrid(safeMinLat)
+        var cellCount = 0
+        
+        while (lat < safeMaxLat && cellCount < MAX_CELLS_PER_REQUEST) {
+            var lon = alignToGrid(safeMinLon)
+            while (lon < safeMaxLon && cellCount < MAX_CELLS_PER_REQUEST) {
                 cells.add(getCellKey(lat, lon))
                 lon += GRID_SIZE
+                cellCount++
             }
             lat += GRID_SIZE
         }
@@ -115,11 +165,12 @@ class ViewportCache(context: Context) {
     
     /**
      * Genera una clave única para una celda
+     * Optimizado para reducir creación de strings
      */
     private fun getCellKey(lat: Double, lon: Double): String {
         val latKey = (lat / GRID_SIZE).toInt()
         val lonKey = (lon / GRID_SIZE).toInt()
-        return "$latKey,$lonKey"
+        return StringBuilder(16).append(latKey).append(',').append(lonKey).toString()
     }
     
     /**
@@ -210,14 +261,23 @@ class ViewportCache(context: Context) {
     
     /**
      * Limpia las áreas más antiguas para liberar memoria
+     * Implementa limpieza agresiva para evitar OutOfMemoryError
      */
     private fun cleanOldestAreas() {
-        // Mantener solo las últimas MAX_CACHED_CELLS áreas
-        val toRemove = loadedAreas.size - MAX_CACHED_CELLS
-        if (toRemove > 0) {
-            val removed = loadedAreas.take(toRemove)
-            loadedAreas.removeAll(removed.toSet())
+        val currentSize = loadedAreas.size
+        if (currentSize > MAX_CACHED_CELLS) {
+            val toRemove = currentSize - (MAX_CACHED_CELLS / 2) // Limpiar más agresivamente
+            Log.d(TAG, "Limpiando $toRemove celdas de $currentSize (límite: $MAX_CACHED_CELLS)")
+            
+            // Convertir a lista para poder usar take()
+            val areasList = loadedAreas.toList()
+            val toRemoveSet = areasList.take(toRemove).toSet()
+            
+            loadedAreas.removeAll(toRemoveSet)
             saveCachedAreas()
+            
+            // Forzar garbage collection si es posible
+            System.gc()
         }
     }
     
@@ -225,16 +285,27 @@ class ViewportCache(context: Context) {
      * Obtiene estadísticas del caché
      */
     fun getCacheStats(): CacheStats {
+        val runtime = Runtime.getRuntime()
+        val usedMemory = runtime.totalMemory() - runtime.freeMemory()
+        val maxMemory = runtime.maxMemory()
+        val memoryUsagePercent = (usedMemory.toDouble() / maxMemory.toDouble()) * 100.0
+        
         return CacheStats(
             cachedCells = loadedAreas.size,
             approximateAreaKm2 = loadedAreas.size * (GRID_SIZE * 111.0).pow(2.0),
-            maxCells = MAX_CACHED_CELLS
+            maxCells = MAX_CACHED_CELLS,
+            memoryUsageMB = usedMemory / (1024 * 1024),
+            maxMemoryMB = maxMemory / (1024 * 1024),
+            memoryUsagePercent = memoryUsagePercent
         )
     }
     
     companion object {
-        // Máximo de celdas en caché (aproximadamente 10000 km²)
-        private const val MAX_CACHED_CELLS = 10000
+        // Máximo de celdas en caché (reducido para evitar OutOfMemoryError)
+        private const val MAX_CACHED_CELLS = 1000
+        // Máximo de celdas por request para evitar bucles infinitos
+        private const val MAX_CELLS_PER_REQUEST = 100
+        private const val TAG = "ViewportCache"
     }
 }
 
@@ -263,7 +334,10 @@ data class BoundingBox(
 data class CacheStats(
     val cachedCells: Int,
     val approximateAreaKm2: Double,
-    val maxCells: Int
+    val maxCells: Int,
+    val memoryUsageMB: Long,
+    val maxMemoryMB: Long,
+    val memoryUsagePercent: Double
 )
 
 // Extension para Math.pow

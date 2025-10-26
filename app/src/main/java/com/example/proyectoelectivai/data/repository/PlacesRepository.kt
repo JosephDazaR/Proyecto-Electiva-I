@@ -94,6 +94,7 @@ class PlacesRepository(private val context: Context) {
     
     /**
      * Descarga y cachea lugares turísticos para un área
+     * Con protección contra OutOfMemoryError
      */
     private suspend fun downloadAndCachePlaces(boundingBox: BoundingBox) {
         try {
@@ -104,22 +105,33 @@ class PlacesRepository(private val context: Context) {
             // Llamar a la API
             val response = overpassService.getTouristPlaces(query)
                 
-                if (response.isSuccessful) {
+            if (response.isSuccessful) {
                 val elements = response.body()?.elements ?: emptyList()
                 Log.d(TAG, "Overpass devolvió ${elements.size} elementos")
                 
-                // Convertir elementos a Places
-                val places = elements.mapNotNull { element ->
-                    convertOverpassElementToPlace(element)
+                // Procesar en lotes para evitar OutOfMemoryError
+                val batchSize = 100
+                val places = mutableListOf<Place>()
+                
+                elements.chunked(batchSize).forEach { batch ->
+                    val batchPlaces = batch.mapNotNull { element ->
+                        convertOverpassElementToPlace(element)
+                    }
+                    places.addAll(batchPlaces)
+                    
+                    // Guardar en lotes para liberar memoria
+                    if (places.size >= batchSize) {
+                        placeDao.insertPlaces(places.take(batchSize))
+                        places.removeAll(places.take(batchSize))
+                    }
                 }
                 
-                Log.d(TAG, "Convertidos a ${places.size} lugares")
-                
-                // Guardar en Room
+                // Guardar lugares restantes
                 if (places.isNotEmpty()) {
                     placeDao.insertPlaces(places)
-                    Log.d(TAG, "Guardados ${places.size} lugares en Room")
                 }
+                
+                Log.d(TAG, "Convertidos y guardados ${elements.size} lugares en total")
                 
                 // Marcar área como cacheada
                 viewportCache.markAreaAsCached(
@@ -131,6 +143,10 @@ class PlacesRepository(private val context: Context) {
             } else {
                 Log.e(TAG, "Error en Overpass: ${response.code()} - ${response.message()}")
             }
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "OutOfMemoryError descargando lugares, limpiando caché", e)
+            viewportCache.clearCache()
+            System.gc()
         } catch (e: Exception) {
             Log.e(TAG, "Error descargando lugares", e)
         }
@@ -359,10 +375,19 @@ class PlacesRepository(private val context: Context) {
             }
         }
         
-        // Guardar en cache si hay resultados
+        // Guardar en cache si hay resultados (en lotes para evitar OutOfMemoryError)
         if (allResults.isNotEmpty()) {
-            placeDao.insertPlaces(allResults)
-            Log.d(TAG, "Guardados ${allResults.size} lugares en cache")
+            try {
+                val batchSize = 50
+                allResults.chunked(batchSize).forEach { batch ->
+                    placeDao.insertPlaces(batch)
+                }
+                Log.d(TAG, "Guardados ${allResults.size} lugares en cache")
+            } catch (e: OutOfMemoryError) {
+                Log.e(TAG, "OutOfMemoryError guardando resultados de búsqueda", e)
+                viewportCache.clearCache()
+                System.gc()
+            }
         }
         
         allResults
